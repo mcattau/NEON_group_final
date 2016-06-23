@@ -5,26 +5,86 @@ date: "June 23, 2016"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+# How do forest charcteristics vary as a function of disturbance history in SOAP, CA?
+
+## This is the random forest classification that will be used as a metric of forest characteristics
+
+```{r load_packages}
+# Check working directory
+getwd()
+
+# Load our packages
+library(raster)
+library(rgdal)
+library(ggplot2)
+library(dplyr)
+library(sp)
+setwd("~/Documents/data/NEONDI-2016/NEON_group_final/Scripts/")
 ```
 
-## R Markdown
+### Load data
+Load LiDAR data - CHM, Slope, and Aspect
+```{r load_LiDAR_data}
+# Load LiDAR CHM raster
+soap_chm<-raster("../../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarCHM.tif")
+# look at it
+hist(soap_chm)
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+# Load LiDAR Slope raster
+soap_slope<-raster("../../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarSlope.tif")
+# look at it
+hist(soap_slope)
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+# Load LiDAR Aspect raster
+soap_aspect<-raster("../../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarAspect.tif")
+# look at it
+hist(soap_aspect)
 ```
 
-## Including Plots
+Load HI data
+```{r import_hI}
+# Import the HI data
+soap_HI_NDVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_NDVI.tif")
+soap_HI_SAVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_SAVI.tif")
+soap_HI_ARVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_ARVI.tif")
+soap_HI_EVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_EVI.tif")
+soap_HI_NDLI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_NDLI.tif")
+soap_HI_NDNI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_NDNI.tif")
+soap_HI_PRI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_PRI.tif")
 
-You can also embed plots, for example:
+cor
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+
+### REFLECTANCE?
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+# Load insitu measurements
+```{r load_field_measurements}
+# Load insitu veg data
+# soap_insitu1<-read.csv("../../NEONdata/D17-California/SOAP/2013/insitu/veg-structure/D17_2013_SOAP_vegStr.csv", stringsAsFactors = FALSE)
+# we don't need the above because the same info is in the below
+
+soap_insitu<-readOGR("../../NEONdata/D17-California/SOAP/2013/insitu/veg-structure", "soap_stems")
+names(soap_insitu)
+str(soap_insitu)
+
+# How many species are there at this site?
+length(unique(soap_insitu$taxonid))
+length(unique(soap_insitu$scientific))
+
+# The data says there are 17 taxonids and 16 spp, so we needed to fix the erroneous taxonid
+
+soap_insitu$taxonid<-gsub("CAIN3", "CEIN3", soap_insitu$taxonid)
+# It's fixed! Now there are 16 taxonids and 16 scientific names
+```
+
+Make a data cube
+Sample HI and LiDAR data at stem points
+
+Withhold 20 % of insitu for validataion
+
+Random forest classification
+
+Fin
+
+
