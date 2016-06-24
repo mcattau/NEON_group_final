@@ -206,6 +206,9 @@ qplot(x=spectra.flight2$wavelength,
 
 Put data together in a datacube
 ```{r combine data}
+
+HI.LiDAR.data<-stack(HI.data, LiDAR.data)
+
 # write a function to compare extents and crop layers if they are different
 same_extent<-function(raster1, raster2) {
   if (extent(raster1)==extent(raster2)) {
@@ -223,10 +226,17 @@ same_extent<-function(raster1, raster2) {
     return(raster.stack)
 }
 
+overlap<-raster::intersect(extent(HI.LiDAR.data), extent(all.bands.stack.flight1))
+HI.LiDAR.data<-crop(HI.LiDAR.data, overlap)
+
+# test this
+same_extent(HI.LiDAR.data, all.bands.stack.flight1)
+
+all.data3<-stack(HI.LiDAR.data, all.bands.stack.flight1)
 
 # check our data
-all.data<-stack(HI.data, LiDAR.data)
-all.data
+
+all.data<-all.data3
 # no NAs in this dataframe
 ```
 
@@ -242,9 +252,6 @@ str(cordf)
 coor.cordf<-round(cor(cordf),2)
 #export as csv to variables.correlation
 write.csv(coor.cordf,"../Outputs/var_cor_no_reflectance.csv")
-
-
-### ADD REFLECTANCE!!
 ```
 
 Sample HI and LiDAR data at stem points and get training and validation data
