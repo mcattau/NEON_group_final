@@ -2,3 +2,8 @@
 .Rhistory
 .RData
 .Ruserdata
+*.dbf
+*.DS_Store
+*.prj
+*.shp
+*.shx

@@ -1,0 +1,439 @@
+---
+title: "Test"
+author: "Kristin Braziunas"
+date: "June 23, 2016"
+output: html_document
+---
+
+```{r load-libraries }
+
+library(raster)
+library(rgdal)
+library(neonAOP)
+library(dplyr)
+library(rhdf5)
+library(rgeos)
+
+```
+
+```{r do-some-test-plots }
+
+setwd("~/Documents/data/NEONDI-2016/NEON_group_final/")
+chm <- raster("../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarCHM.tif")
+insitu <- read.csv("../NEONdata/D17-California/SOAP/2013/insitu/veg-structure/D17_2013_SOAP_vegStr.csv")
+
+
+
+plot(chm)
+plot(stem_map, add=TRUE)
+plot(centroids, add=TRUE, col="blue")
+
+stem_map <- readOGR("../NEONdata/D17-California/SOAP/2013/insitu/veg-structure",
+                    "soap_stems")
+
+
+
+centroids <- readOGR("../NEONdata/D17-California/SOAP/vector_data",
+                    "SOAP_centroids")
+
+?plot
+
+insitu.sub <- subset(insitu, easting < 298000 & northing > 4100400)
+str(insitu)
+str(insitu.sub)
+plot(northing~easting, insitu.sub)
+
+unique(insitu.sub$scientificname)
+unique(insitu.sub$taxonid)
+
+insitu.sub$taxonid <- gsub("CAIN3","CEIN3", insitu.sub$taxonid)
+length(unique(insitu.sub$taxonid))
+unique(insitu.sub$taxonid)
+
+stem_map$taxonid <- gsub("CAIN3","CEIN3", stem_map$taxonid)
+
+
+length(unique(stem_map$taxonid))
+length(unique(stem_map$scientific))
+
+?gsub
+
+```
+
+## Using Leah Wasser's github code to try to subset AOP HSI data
+
+```{r subset-hsi }
+
+## SOAP Clip
+# the name of the site
+site <- "SOAP"
+domain <- "D17"
+fullDomain <- "D17-California"
+level <- "L1"
+dataType <- "Spectrometer"
+level <- paste0(site,"_L1")
+year <- "2013"
+productType <- paste0(site,"_", dataType)
+dataProduct <- "Reflectance"
+
+
+drivePath <- "Volumes"
+driveName <- "AOP-NEON1-4"
+
+dataDir <- file.path(drivePath, driveName,
+                      domain,
+                      site, year, level, productType, dataProduct)
+dataDir <- paste0("/", dataDir)
+# get a list of all files in the dir
+h5.files <- list.files(dataDir, pattern = '\\.h5$', full.names = TRUE)
+
+#### Import shapefile ####
+# import shapefile
+clipFilePath <- file.path("../NEONData", fullDomain, site, "vector_data")
+clipFile <- paste0(site,"_crop")
+clip.polygon <- readOGR(clipFilePath, clipFile)
+
+#####
+## functions
+## Check Extent Function ####
+# this function below checks to see if a raster falls within a spatial extent
+# inputs: raster file to check, clipShp (spatial )
+checkExtent <- function(aRaster, clipShp){
+  # create polygon extent assign CRS to extent 
+  h5.extent.sp <- as(h5Extent, "SpatialPolygons")
+  # note this is ASSUMING both the extent and the h5 file are in the same CRS
+  crs(rasterExtPoly) <-  crs(clip.polygon)
+
+  # check to see if the polygons overlap
+  # return a boolean (1= the raster contains pixels within the extent, 0 it doesn't)
+  return(gIntersects(h5.extent.sp, clip.polygon))
+}
+# checkExtent("/Volumes/AOP-NEON1-4/D17/SOAP/2013/SOAP_L1/SOAP_Spectrometer/Reflectance/NIS1_20130615_165533_atmcor.h5")
+# h5.files
+# initalize counter and list object
+recordRaster <- NA
+i <- 0
+
+# this loop is repeated below and can probably go away
+# the loop below returns a LIST of the files that have overlapping extent
+for(afile in h5.files){
+  # get extent of h5 file
+  h5Extent <- create_extent(afile)
+  # turn into polygon extent object
+  h5.poly <- as(h5Extent, "SpatialPolygons")
+  # this is assuming both are in the same CRS!
+  crs(h5.poly) <-  crs(clip.polygon)
+  
+  # check to see if the polygons overlap
+  if(gIntersects(h5.poly, clip.polygon)){
+    i <- i+1
+    recordRaster[i] <- afile
+  } else {
+    print("not in")
+  }
+}
+
+recordRaster
+
+```
+
+## Now that I've got Leah's code working, I'm going to create smaller extents based on our stem locations and see which ones have the fewest number of hyperspectral flight lines associated with them.
+
+```{r create-plot-extents }
+
+# first, I have to identify the boundaries of the plots where the stem locations
+# are present, since stem locations do not totally match up with centroids
+
+plot(stem_map)
+
+# i'm extracting the northing and easting max and min and 
+# adding or subtracting 5 as a buffer
+stem_map.extent <- stem_map@data %>% 
+  group_by(plotid) %>%
+  summarise(northing.max = max(northing) + 5,
+            northing.min = min(northing) - 5,
+            easting.max = max(easting) + 5,
+            easting.min = min(easting) - 5)
+
+names(stem_map.extent) <- c("plotid","yPlus","yMinus","xPlus","xMinus")
+
+yPlus <- stem_map.extent$northing.max
+yMinus <- stem_map.extent$northing.min
+xPlus <- stem_map.extent$easting.max
+xMinus <- stem_map.extent$easting.min
+
+# copying code from group uncertainty
+
+square <- cbind(xMinus, yPlus, 
+                xPlus, yPlus, 
+                xPlus, yMinus, 
+                xMinus, yMinus, 
+                xMinus, yPlus,
+                xMinus, yPlus)
+
+ID <- stem_map.extent$plotid
+
+```
+
+
+## Create spatial polygons using the coordinates
+
+```{r create-spatial-polygons }
+
+# Create a function to do this
+polys <- SpatialPolygons(mapply(function(poly, id) {
+  xy <- matrix(poly, ncol=2, byrow=TRUE)  # take a list and create a matrix
+  Polygons(list(Polygon(xy)), ID=id)
+}, split(square, row(square)), ID),proj4string=CRS(as.character("+proj=utm +zone=11 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0")))
+
+```
+
+## Create shapefile
+
+This is an important step to extract the data.
+
+```{r create-shapefile }
+
+polys.df <- SpatialPolygonsDataFrame(polys, data.frame(id=ID, row.names=ID))
+
+```
+
+## Plot this with our CHM
+
+```{r plot-square-buffers }
+
+plot(chm)
+plot(polys.df, add=TRUE)
+
+polys.df
+clip.polygon
+
+```
+
+## Apply Leah's function with my new shapefiles
+
+```{r match-plots-with-hsi }
+
+
+find_intersect_h5 <- function(h5.files, clip.polygon){
+  recordRaster <- NA
+  i <- 0
+  # the loop below returns a LIST of the files that have overlapping extent
+  for(afile in h5.files){
+    # get extent of h5 file
+    h5Extent <- create_extent(afile)
+    # turn into polygon extent object
+    h5.poly <- as(h5Extent, "SpatialPolygons")
+    # this is assuming both are in the same CRS!
+    crs(h5.poly) <-  crs(clip.polygon)
+    
+    # check to see if the polygons overlap
+    if(gIntersects(h5.poly, clip.polygon)){
+      i <- i+1
+      recordRaster[i] <- afile
+    } else {
+      print("not in")
+    }
+  } 
+  return(recordRaster)
+}
+
+## Loop through all of the H5 files and return a list of what's "in"
+intersect_files <- find_intersect_h5(h5.files, 
+clip.polygon)
+
+################### Next -- see if you can loop through polygons ####
+
+# for this to work the shapefile has to have an "Id" field with numbers 1-x
+soap.plots <- polys.df
+
+# clip.file <- soap.plots[soap.plots$Id == 1,]
+final.files <- vector("list", length(soap.plots))
+
+# make copy of names
+soap.plots$name <- soap.plots$id
+
+# change id to numeric
+soap.plots$id <- as.numeric(soap.plots$id)
+
+# This for loop generates a list of flightlines that intersect each polygon in a 
+# shapefile. Note that the spatial object needs an Id field that is numbered 1-n
+for(i in 1:length(soap.plots)){
+  clip.file <- soap.plots[soap.plots$id == i,]
+  final.files[[i]] <- find_intersect_h5(h5.files, 
+                                 clip.file)
+  }
+
+
+# this will separate mutiple polygons into individuals
+first.box <- soap.plots[soap.plots$id == 1,]
+first.box
+
+second.box <- soap.plots[soap.plots$id == 2,]
+second.box
+
+first.box <- soap.plots[soap.plots$id == 1,]
+first.box
+
+
+# take a look at the output
+str(final.files)
+soap.plots@data
+
+
+```
+
+## I'm copying some more code from Leah to get the extents of each of the flightlines
+
+```{r export-extents-hsi }
+
+################ Write Extent Shapefiles Function ########################
+
+# Inputs:
+# f: a path to an h5 file that you'd like an extent for.
+# shpDir: path to the output directory where you want to store the data
+# projf4Str: the proj4 formated string of the CRS that the H5 file is in.
+# NOTE: proj4 NEEDS to be in the same proj as your h5 file
+write_shapefile_bound <- function(f, shpDir, proj4Str){
+  # create shapefileName
+  # output
+  h5.extent <- create_extent(f)
+  # create polygon extent assign CRS to extent 
+  h5.extent.sp <- as(h5.extent, "SpatialPolygons")
+  # create data.frame, add the name of the file to the shapefile
+  sp.df <- data.frame(id=basename(f))
+  sp.obj <- SpatialPolygonsDataFrame(h5.extent.sp, sp.df)
+  # assign CRS
+  crs(sp.obj) <- CRS(proj4Str)
+  # create shapefile output name
+  outName <- gsub(pattern = ".h5",
+                  x = basename(f),
+                  replacement = "")
+  writeOGR(sp.obj, 
+           shpDir, #path to export to
+           outName,
+           driver="ESRI Shapefile",
+           overwrite_layer = TRUE)
+}
+
+##################### Run Export Polygon Boundary for Each Flightline ##############
+
+# export extent polygon for all flightlines
+proj4Str <- "+proj=utm +zone=11 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs"
+shpDir <- paste0("exports/", site, "_flightLines")
+
+sapply(h5.files, write_shapefile_bound,
+       proj4Str = proj4Str,
+       shpDir = shpDir)
+
+#################### End Export Polygon Boundary for Each Flightline ###########
+
+
+
+```
+
+## I'm going to choose a couple flightlines to load the extents for
+
+```{r load-hsi-shapefiles }
+
+plot(chm)
+plot(polys.df, add=TRUE)
+
+flight1 <- readOGR("exports/SOAP_flightLines","NIS1_20130612_104000_atmcor")
+plot(flight1, add=TRUE)
+# there are 4 plots close to the center
+
+flight2 <- readOGR("exports/SOAP_flightLines","NIS1_20130612_104651_atmcor")
+plot(flight2, add=TRUE)
+# there are 4 plots close to the center, so choose these
+
+polys.df
+plot(second.box, add=TRUE)
+
+soap.plots@polygons[[1]]@Polygons[[1]]@coords
+
+```
+
+## Let's try using second.box to extract HSI data from flight2
+
+```{r extract-hsi }
+
+# choose the plots that intersect with flight 2 for extracting HSI
+flight2.plots <- intersect(soap.plots, flight2)
+flight2.plots
+
+# define the CRS definition by EPSG code
+epsg <- 32611
+
+
+# define the file you want to work with
+f <- paste0(dataDir, "/NIS1_20130612_104651_atmcor.h5")
+
+# define clip.extents
+clip.extent <- flight2.plots
+
+# calculate extent of H5 file
+h5.ext <- create_extent(f)
+h5.ext
+
+## class       : Extent 
+## xmin        : 325963 
+## xmax        : 326507 
+## ymin        : 4102904 
+## ymax        : 4103482
+
+# turn the H5 extent into a polygon to check overlap
+h5.ext.poly <- as(extent(h5.ext), 
+                  "SpatialPolygons")
+
+crs(h5.ext.poly) <- crs(clip.extent)
+
+# test to see that the extents overlap
+gIntersects(h5.ext.poly, 
+            clip.extent)
+
+## [1] TRUE
+
+# Use the clip extent to create the index extent that can be used to slice out data from the 
+# H5 file
+# xmin.index, xmax.index, ymin.index, ymax.index
+# all units will be rounded which means the pixel must occupy a majority (.5 or greater)
+# within the clipping extent
+clip.extent[clip.extent$id.1 == i,]
+
+index.bounds <- vector("list", length(clip.extent))
+
+for(i in 1:length(clip.extent)) {
+  index.bounds[[i]] <- calculate_index_extent(extent(clip.extent[clip.extent$id.1 == i,]),
+								h5.ext)
+}
+index.bounds
+
+index.bounds <- calculate_index_extent(extent(clip.extent),
+								h5.ext)
+index.bounds
+write.csv(index.bounds,"index_bounds.csv")
+
+## [1]  39 127  21  92
+
+# open a band that is subsetted using the clipping extent
+# if you set subsetData to true, then provide the dimensions that you wish to slice out
+for(i in length(index.bounds)) {
+  b58_clipped[i] <- open_band(fileName=f,
+	  							bandNum=58,
+		  						epsg=32611,
+			  					subsetData = TRUE,
+				  				dims=index.bounds[[i]])
+}
+plot(chm)
+# plot clipped bands
+plot(flight2.plots, add=TRUE)
+plot(b58_clipped,
+     main="Band 58 Clipped", add=TRUE, col="red")
+
+plot(b58_clipped,
+     main="Band 58 Clipped")
+
+b58_clipped
+```
+

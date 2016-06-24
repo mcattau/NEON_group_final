@@ -5,26 +5,200 @@ date: "June 23, 2016"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+# How do forest charcteristics vary as a function of disturbance history in SOAP, CA?
+
+## This is the random forest classification that will be used as a metric of forest characteristics
+
+```{r load_packages}
+# Check working directory
+getwd()
+
+# Load our packages
+library(raster)
+library(rgdal)
+library(ggplot2)
+library(dplyr)
+library(sp)
+# install.packages("randomForest")
+library(randomForest)
+
+setwd("~/Documents/data/NEONDI-2016/NEON_group_final/Scripts/")
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+### Load data
+Load LiDAR data - CHM, Slope, and Aspect
+```{r load_LiDAR_data}
+# Load LiDAR CHM raster
+soap_chm<-raster("../../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarCHM.tif")
+# look at it
+hist(soap_chm)
+summary(soap_chm)
+# Load LiDAR Slope raster
+soap_slope<-raster("../../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarSlope.tif")
+# look at it
+hist(soap_slope)
+summary(soap_slope)
+# Load LiDAR Aspect raster
+soap_aspect<-raster("../../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarAspect.tif")
+# look at it
+hist(soap_aspect)
+summary(soap_aspect)
+# LiDAR data stack
+LiDAR.data<-brick(soap_chm,soap_slope,soap_aspect)
 ```
 
-## Including Plots
+Load HI data
+```{r import_hI}
+# Import the HI data
+# In the absence of reflectance, we've got indices
+soap_HI_NDVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_NDVI.tif")
+plot(soap_HI_NDVI)
+summary(soap_HI_NDVI)
+soap_HI_SAVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_SAVI.tif")
+plot(soap_HI_SAVI)
+summary(soap_HI_SAVI)
+soap_HI_ARVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_ARVI.tif")
+plot(soap_HI_ARVI)
+summary(soap_HI_ARVI)
+soap_HI_EVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_EVI.tif")
+plot(soap_HI_EVI)
+summary(soap_HI_EVI)
+soap_HI_NDLI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_NDLI.tif")
+plot(soap_HI_NDLI)
+summary(soap_HI_NDLI)
+soap_HI_NDNI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_NDNI.tif")
+plot(soap_HI_NDNI)
+summary(soap_HI_NDNI)
+soap_HI_PRI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_PRI.tif")
+plot(soap_HI_PRI)
+summary(soap_HI_PRI)
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+# HI data stack
+HI.data<-brick(soap_HI_NDVI,soap_HI_SAVI, soap_HI_ARVI, soap_HI_EVI,soap_HI_NDLI, soap_HI_NDNI, soap_HI_PRI)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Put data together in a datacube
+```{r combine data}
+# write a function to compare extents and crop layers if they are different
+same_extent<-function(raster1, raster2) {
+  if (extent(raster1)==extent(raster2)) {
+    print("Rasters have same extent")
+  } else {
+    overlap<-raster::intersect(extent(raster1), extent(raster2))
+    # crop both rasters
+    # might be good to check which is bigger and compare
+    print("Extents are different, Cropping data")
+    raster1<-crop(raster1, overlap)
+    raster2<-crop(raster2, overlap)
+    # create a stack of the new rasters
+  }
+    raster.stack<-stack(raster1, raster2)
+    return(raster.stack)
+}
+
+
+# check our data
+all.data<-stack(HI.data, LiDAR.data)
+all.data
+# no NAs in this dataframe
+```
+
+# Make a df of the indices and examine which are correlated
+```{r corr-variables}
+
+# look at correlation bt variables
+all.data.df<-as.data.frame(all.data)
+cordf<-na.omit(all.data.df)
+str(cordf)
+
+# if more than 0.4, correlated, don't use some or put interaction'
+coor.cordf<-round(cor(cordf),2)
+#export as csv to variables.correlation
+write.csv(coor.cordf,"../Outputs/var_cor_no_reflectance.csv")
+
+
+### ADD REFLECTANCE!!
+```
+
+# Load insitu measurements
+```{r load_field_measurements}
+# Load insitu veg data
+# soap_insitu1<-read.csv("../../NEONdata/D17-California/SOAP/2013/insitu/veg-structure/D17_2013_SOAP_vegStr.csv", stringsAsFactors = FALSE)
+# we don't need the above because the same info is in the below
+
+soap_insitu<-readOGR("../../NEONdata/D17-California/SOAP/2013/insitu/veg-structure", "soap_stems")
+names(soap_insitu)
+str(soap_insitu)
+
+# How many species are there at this site?
+length(unique(soap_insitu$taxonid))
+length(unique(soap_insitu$scientific))
+
+# The data says there are 17 taxonids and 16 spp, so we needed to fix the erroneous taxonid
+
+soap_insitu$taxonid<-gsub("CAIN3", "CEIN3", soap_insitu$taxonid)
+# It's fixed! Now there are 16 taxonids and 16 scientific names
+```
+
+
+Sample HI and LiDAR data at stem points and get training and validation data
+```{r sample_cube_at_stems}
+
+# Should we sample at 1m pixel or take neighbors? Look at crown diameter stats to decide
+soap_insitu<-soap_insitu[-220,] #remove this NA
+summary(soap_insitu$maxcanopyd)
+# Mean (2.34) and median (1.6) max canopy diameter is over 1m, so sample larger that 1m cell. Create buffers for maxcanopyd/2 for each stem
+#The buffer can be specified as a single value, or as a vector of the length of the number of points
+
+buffers<-(soap_insitu$maxcanopyd)/2
+
+# sampled_points<-extract(all.data, soap_insitu, buffer=buffers, small=TRUE, fun=mean, na.rm=TRUE)
+# sample buffer specific to mean crown width. The small argument returns a number even if the buffer doesn't include a cell center. Use the mean function so if the buffer includes multiple cells, it will take mean value of those cells.
+
+# work-around for the error that happens above
+sampled_points1<-extract(all.data, soap_insitu, buffer=buffers, small=TRUE)
+# SP = TRUE, make it spatial, ??extract - one that asks it to return the entire df
+# get the mean for each point (buffer) by layer
+sampled_points2<-lapply(sampled_points1, function(x) ifelse(is.matrix(x), colMeans(x, na.rm=TRUE), x))
+# combine
+sampled_points<-do.call(rbind, sampled_points2)
+head(sampled_points)
+
+### check this out to see if it makes sense. For example, measured tree height vs. sampled tree height and compare w just using global buffer radius
+
+#### Withhold 20 % of insitu for validataion - or is this included in random forest??
+training<-
+validation<-
+```
+
+Random forest classification
+```{r random_forest_classification}
+# Machine or ensemble learning method. Can do both regression and classification tasks, and undertakes dimensional reduction methods, treats missing values, outlier values and other essential steps of data exploration. It is a type of ensemble learning method, where multiple CART models are combined
+
+# Set a random seed so that results are reproducible next time we load the code - because this process has two sources of randomness (bagging for bootstrap aggregating takes subset of rows and only running subset of samples each time and subset of predictor variables (sqrt of those available))
+
+set.seed(3693)
+
+fit1 <- randomForest(as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch + Fare +
+                                            Embarked + Title + FamilySize + FamilyID2,
+                      data=sampled_points, 
+                      importance=TRUE, 
+                      ntree=500)
+# ntree is number of trees to grow
+# 
+
+head(sampled_points)
+x <- cbind(x_train,y_train)
+# Fitting model
+fit <- randomForest(Species ~ ., x,ntree=500)
+summary(fit)
+#Predict Output 
+predicted= predict(fit,x_test)
+
+
+
+```
+
+# Fin!
+
+
