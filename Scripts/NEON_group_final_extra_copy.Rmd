@@ -5,6 +5,8 @@ date: "June 23, 2016"
 output: html_document
 ---
 
+### this is a copy of what Megan did before Kristin worked on it
+
 # How do forest charcteristics vary as a function of disturbance history in SOAP, CA?
 
 ## This is the random forest classification that will be used as a metric of forest characteristics
