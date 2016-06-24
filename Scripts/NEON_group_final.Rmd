@@ -19,6 +19,8 @@ library(rgdal)
 library(ggplot2)
 library(dplyr)
 library(sp)
+library(neonAOP)
+library(rhdf5)
 # install.packages("randomForest")
 library(randomForest)
 
@@ -237,4 +239,104 @@ predicted= predict(fit,x_test)
 
 # Fin!
 
+## Braziunas edits start here. I'm going to start by importing the index boundaries for the two areas, each with 4 plots, where we are going to pull out hyperspectral data.
+
+```{r import-index-boundaries }
+
+# first import the boundaries
+index.bounds.flight1 <- read.csv("../index_bounds.csv", sep=",")[,2]
+index.bounds.flight2 <- read.csv("../index_bounds2.csv", sep=",")[,2]
+
+```
+
+## Import flightpaths previously identified
+
+```{r import-hsi-flightpaths }
+
+flight1 <- "/Volumes/AOP-NEON1-4/D17/SOAP/2013/SOAP_L1/SOAP_Spectrometer/Reflectance/NIS1_20130612_104651_atmcor.h5"
+
+flight2 <- "/Volumes/AOP-NEON1-4/D17/SOAP/2013/SOAP_L1/SOAP_Spectrometer/Reflectance/NIS1_20130612_104000_atmcor.h5"
+
+```
+
+## Extract bands from flightpaths
+
+```{r extract-bands }
+
+# thanks to Leah, we know which bands are noisy
+# so only importing bands that are not noisy
+
+# grab all bands
+bands <- c(1:192,214:282,316:403)
+
+# set epsg
+epsg <- 32611
+
+# get stack
+all.bands.stack.flight1 <- create_stack(flight1, 
+                         bands, 
+                         epsg,
+                         subset=TRUE,
+                         dims=index.bounds.flight1)
+
+# get stack
+all.bands.stack.flight2 <- create_stack(flight2, 
+                         bands, 
+                         epsg,
+                         subset=TRUE,
+                         dims=index.bounds.flight2)
+
+# check via plotting to make sure we got the right areas
+plot(soap_chm)
+plot(all.bands.stack.flight1[[1]], add=TRUE, col="red")
+plot(all.bands.stack.flight2[[1]], add=TRUE, col="blue")
+
+# also take a look at the wavelength plots
+
+# get spectra for each band
+spectra.flight1 <- extract_av_refl(all.bands.stack.flight1, 
+                           aFun = mean)
+spectra.flight1 <- as.data.frame(spectra.flight1)
+
+# read in the wavelength information from the HDF5 file
+wavelengths<- h5read(flight1, "wavelength")
+
+# convert wavelength to nanometers (nm)
+wavelengths <- wavelengths * 1000
+
+spectra.flight1$wavelength <- wavelengths[bands]
+
+# plot spectra
+qplot(x=spectra.flight1$wavelength,
+      y=spectra.flight1$spectra.flight1,
+      xlab="Wavelength (nm)",
+      ylab="Reflectance",
+      main="Spectra for all pixels\nFlight1",
+      ylim = c(0, .35))
+
+## now flight 2
+# get spectra for each band
+spectra.flight2 <- extract_av_refl(all.bands.stack.flight2, 
+                           aFun = mean)
+spectra.flight2 <- as.data.frame(spectra.flight2)
+
+# read in the wavelength information from the HDF5 file
+wavelengths<- h5read(flight2, "wavelength")
+
+# convert wavelength to nanometers (nm)
+wavelengths <- wavelengths * 1000
+
+spectra.flight2$wavelength <- wavelengths[bands]
+
+wavelengths
+
+# plot spectra
+qplot(x=spectra.flight2$wavelength,
+      y=spectra.flight2$spectra.flight2,
+      xlab="Wavelength (nm)",
+      ylab="Reflectance",
+      main="Spectra for all pixels\nFlight 2",
+      ylim = c(0, .35))
+
+```
 
