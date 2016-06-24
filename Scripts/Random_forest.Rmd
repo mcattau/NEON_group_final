@@ -28,8 +28,8 @@ fit1 <- randomForest(as.factor(SOAP_ID) ~ SOAP_NDVI + SOAP_SAVI + SOAP_ARVI + SO
                       importance=TRUE, 
                       ntree=500)
 # ntree is number of trees to grow
+sqrt(350)
 
-summary(fit1)
 
 # What variables were important?
 varImpPlot(fit1)
