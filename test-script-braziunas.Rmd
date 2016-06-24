@@ -114,6 +114,7 @@ checkExtent <- function(aRaster, clipShp){
 recordRaster <- NA
 i <- 0
 
+# this loop is repeated below and can probably go away
 # the loop below returns a LIST of the files that have overlapping extent
 for(afile in h5.files){
   # get extent of h5 file
@@ -205,8 +206,234 @@ plot(chm)
 plot(polys.df, add=TRUE)
 
 polys.df
+clip.polygon
 
 ```
 
+## Apply Leah's function with my new shapefiles
 
+```{r match-plots-with-hsi }
+
+
+find_intersect_h5 <- function(h5.files, clip.polygon){
+  recordRaster <- NA
+  i <- 0
+  # the loop below returns a LIST of the files that have overlapping extent
+  for(afile in h5.files){
+    # get extent of h5 file
+    h5Extent <- create_extent(afile)
+    # turn into polygon extent object
+    h5.poly <- as(h5Extent, "SpatialPolygons")
+    # this is assuming both are in the same CRS!
+    crs(h5.poly) <-  crs(clip.polygon)
+    
+    # check to see if the polygons overlap
+    if(gIntersects(h5.poly, clip.polygon)){
+      i <- i+1
+      recordRaster[i] <- afile
+    } else {
+      print("not in")
+    }
+  } 
+  return(recordRaster)
+}
+
+## Loop through all of the H5 files and return a list of what's "in"
+intersect_files <- find_intersect_h5(h5.files, 
+clip.polygon)
+
+################### Next -- see if you can loop through polygons ####
+
+# for this to work the shapefile has to have an "Id" field with numbers 1-x
+soap.plots <- polys.df
+
+# clip.file <- soap.plots[soap.plots$Id == 1,]
+final.files <- vector("list", length(soap.plots))
+
+# make copy of names
+soap.plots$name <- soap.plots$id
+
+# change id to numeric
+soap.plots$id <- as.numeric(soap.plots$id)
+
+# This for loop generates a list of flightlines that intersect each polygon in a 
+# shapefile. Note that the spatial object needs an Id field that is numbered 1-n
+for(i in 1:length(soap.plots)){
+  clip.file <- soap.plots[soap.plots$id == i,]
+  final.files[[i]] <- find_intersect_h5(h5.files, 
+                                 clip.file)
+  }
+
+
+# this will separate mutiple polygons into individuals
+first.box <- soap.plots[soap.plots$id == 1,]
+first.box
+
+second.box <- soap.plots[soap.plots$id == 2,]
+second.box
+
+first.box <- soap.plots[soap.plots$id == 1,]
+first.box
+
+
+# take a look at the output
+str(final.files)
+soap.plots@data
+
+
+```
+
+## I'm copying some more code from Leah to get the extents of each of the flightlines
+
+```{r export-extents-hsi }
+
+################ Write Extent Shapefiles Function ########################
+
+# Inputs:
+# f: a path to an h5 file that you'd like an extent for.
+# shpDir: path to the output directory where you want to store the data
+# projf4Str: the proj4 formated string of the CRS that the H5 file is in.
+# NOTE: proj4 NEEDS to be in the same proj as your h5 file
+write_shapefile_bound <- function(f, shpDir, proj4Str){
+  # create shapefileName
+  # output
+  h5.extent <- create_extent(f)
+  # create polygon extent assign CRS to extent 
+  h5.extent.sp <- as(h5.extent, "SpatialPolygons")
+  # create data.frame, add the name of the file to the shapefile
+  sp.df <- data.frame(id=basename(f))
+  sp.obj <- SpatialPolygonsDataFrame(h5.extent.sp, sp.df)
+  # assign CRS
+  crs(sp.obj) <- CRS(proj4Str)
+  # create shapefile output name
+  outName <- gsub(pattern = ".h5",
+                  x = basename(f),
+                  replacement = "")
+  writeOGR(sp.obj, 
+           shpDir, #path to export to
+           outName,
+           driver="ESRI Shapefile",
+           overwrite_layer = TRUE)
+}
+
+##################### Run Export Polygon Boundary for Each Flightline ##############
+
+# export extent polygon for all flightlines
+proj4Str <- "+proj=utm +zone=11 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs"
+shpDir <- paste0("exports/", site, "_flightLines")
+
+sapply(h5.files, write_shapefile_bound,
+       proj4Str = proj4Str,
+       shpDir = shpDir)
+
+#################### End Export Polygon Boundary for Each Flightline ###########
+
+
+
+```
+
+## I'm going to choose a couple flightlines to load the extents for
+
+```{r load-hsi-shapefiles }
+
+plot(chm)
+plot(polys.df, add=TRUE)
+
+flight1 <- readOGR("exports/SOAP_flightLines","NIS1_20130612_104000_atmcor")
+plot(flight1, add=TRUE)
+# there are 4 plots close to the center
+
+flight2 <- readOGR("exports/SOAP_flightLines","NIS1_20130612_104651_atmcor")
+plot(flight2, add=TRUE)
+# there are 4 plots close to the center, so choose these
+
+polys.df
+plot(second.box, add=TRUE)
+
+soap.plots@polygons[[1]]@Polygons[[1]]@coords
+
+```
+
+## Let's try using second.box to extract HSI data from flight2
+
+```{r extract-hsi }
+
+# choose the plots that intersect with flight 2 for extracting HSI
+flight2.plots <- intersect(soap.plots, flight2)
+flight2.plots
+
+# define the CRS definition by EPSG code
+epsg <- 32611
+
+
+# define the file you want to work with
+f <- paste0(dataDir, "/NIS1_20130612_104651_atmcor.h5")
+
+# define clip.extents
+clip.extent <- flight2.plots
+
+# calculate extent of H5 file
+h5.ext <- create_extent(f)
+h5.ext
+
+## class       : Extent 
+## xmin        : 325963 
+## xmax        : 326507 
+## ymin        : 4102904 
+## ymax        : 4103482
+
+# turn the H5 extent into a polygon to check overlap
+h5.ext.poly <- as(extent(h5.ext), 
+                  "SpatialPolygons")
+
+crs(h5.ext.poly) <- crs(clip.extent)
+
+# test to see that the extents overlap
+gIntersects(h5.ext.poly, 
+            clip.extent)
+
+## [1] TRUE
+
+# Use the clip extent to create the index extent that can be used to slice out data from the 
+# H5 file
+# xmin.index, xmax.index, ymin.index, ymax.index
+# all units will be rounded which means the pixel must occupy a majority (.5 or greater)
+# within the clipping extent
+clip.extent[clip.extent$id.1 == i,]
+
+index.bounds <- vector("list", length(clip.extent))
+
+for(i in 1:length(clip.extent)) {
+  index.bounds[[i]] <- calculate_index_extent(extent(clip.extent[clip.extent$id.1 == i,]),
+								h5.ext)
+}
+index.bounds
+
+index.bounds <- calculate_index_extent(extent(clip.extent),
+								h5.ext)
+index.bounds
+write.csv(index.bounds,"index_bounds.csv")
+
+## [1]  39 127  21  92
+
+# open a band that is subsetted using the clipping extent
+# if you set subsetData to true, then provide the dimensions that you wish to slice out
+for(i in length(index.bounds)) {
+  b58_clipped[i] <- open_band(fileName=f,
+	  							bandNum=58,
+		  						epsg=32611,
+			  					subsetData = TRUE,
+				  				dims=index.bounds[[i]])
+}
+plot(chm)
+# plot clipped bands
+plot(flight2.plots, add=TRUE)
+plot(b58_clipped,
+     main="Band 58 Clipped", add=TRUE, col="red")
+
+plot(b58_clipped,
+     main="Band 58 Clipped")
+
+b58_clipped
+```
 
