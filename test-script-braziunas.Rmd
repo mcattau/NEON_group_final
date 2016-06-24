@@ -1,0 +1,212 @@
+---
+title: "Test"
+author: "Kristin Braziunas"
+date: "June 23, 2016"
+output: html_document
+---
+
+```{r load-libraries }
+
+library(raster)
+library(rgdal)
+library(neonAOP)
+library(dplyr)
+library(rhdf5)
+library(rgeos)
+
+```
+
+```{r do-some-test-plots }
+
+setwd("~/Documents/data/NEONDI-2016/NEON_group_final/")
+chm <- raster("../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarCHM.tif")
+insitu <- read.csv("../NEONdata/D17-California/SOAP/2013/insitu/veg-structure/D17_2013_SOAP_vegStr.csv")
+
+
+
+plot(chm)
+plot(stem_map, add=TRUE)
+plot(centroids, add=TRUE, col="blue")
+
+stem_map <- readOGR("../NEONdata/D17-California/SOAP/2013/insitu/veg-structure",
+                    "soap_stems")
+
+
+
+centroids <- readOGR("../NEONdata/D17-California/SOAP/vector_data",
+                    "SOAP_centroids")
+
+?plot
+
+insitu.sub <- subset(insitu, easting < 298000 & northing > 4100400)
+str(insitu)
+str(insitu.sub)
+plot(northing~easting, insitu.sub)
+
+unique(insitu.sub$scientificname)
+unique(insitu.sub$taxonid)
+
+insitu.sub$taxonid <- gsub("CAIN3","CEIN3", insitu.sub$taxonid)
+length(unique(insitu.sub$taxonid))
+unique(insitu.sub$taxonid)
+
+stem_map$taxonid <- gsub("CAIN3","CEIN3", stem_map$taxonid)
+
+
+length(unique(stem_map$taxonid))
+length(unique(stem_map$scientific))
+
+?gsub
+
+```
+
+## Using Leah Wasser's github code to try to subset AOP HSI data
+
+```{r subset-hsi }
+
+## SOAP Clip
+# the name of the site
+site <- "SOAP"
+domain <- "D17"
+fullDomain <- "D17-California"
+level <- "L1"
+dataType <- "Spectrometer"
+level <- paste0(site,"_L1")
+year <- "2013"
+productType <- paste0(site,"_", dataType)
+dataProduct <- "Reflectance"
+
+
+drivePath <- "Volumes"
+driveName <- "AOP-NEON1-4"
+
+dataDir <- file.path(drivePath, driveName,
+                      domain,
+                      site, year, level, productType, dataProduct)
+dataDir <- paste0("/", dataDir)
+# get a list of all files in the dir
+h5.files <- list.files(dataDir, pattern = '\\.h5$', full.names = TRUE)
+
+#### Import shapefile ####
+# import shapefile
+clipFilePath <- file.path("../NEONData", fullDomain, site, "vector_data")
+clipFile <- paste0(site,"_crop")
+clip.polygon <- readOGR(clipFilePath, clipFile)
+
+#####
+## functions
+## Check Extent Function ####
+# this function below checks to see if a raster falls within a spatial extent
+# inputs: raster file to check, clipShp (spatial )
+checkExtent <- function(aRaster, clipShp){
+  # create polygon extent assign CRS to extent 
+  h5.extent.sp <- as(h5Extent, "SpatialPolygons")
+  # note this is ASSUMING both the extent and the h5 file are in the same CRS
+  crs(rasterExtPoly) <-  crs(clip.polygon)
+
+  # check to see if the polygons overlap
+  # return a boolean (1= the raster contains pixels within the extent, 0 it doesn't)
+  return(gIntersects(h5.extent.sp, clip.polygon))
+}
+# checkExtent("/Volumes/AOP-NEON1-4/D17/SOAP/2013/SOAP_L1/SOAP_Spectrometer/Reflectance/NIS1_20130615_165533_atmcor.h5")
+# h5.files
+# initalize counter and list object
+recordRaster <- NA
+i <- 0
+
+# the loop below returns a LIST of the files that have overlapping extent
+for(afile in h5.files){
+  # get extent of h5 file
+  h5Extent <- create_extent(afile)
+  # turn into polygon extent object
+  h5.poly <- as(h5Extent, "SpatialPolygons")
+  # this is assuming both are in the same CRS!
+  crs(h5.poly) <-  crs(clip.polygon)
+  
+  # check to see if the polygons overlap
+  if(gIntersects(h5.poly, clip.polygon)){
+    i <- i+1
+    recordRaster[i] <- afile
+  } else {
+    print("not in")
+  }
+}
+
+recordRaster
+
+```
+
+## Now that I've got Leah's code working, I'm going to create smaller extents based on our stem locations and see which ones have the fewest number of hyperspectral flight lines associated with them.
+
+```{r create-plot-extents }
+
+# first, I have to identify the boundaries of the plots where the stem locations
+# are present, since stem locations do not totally match up with centroids
+
+plot(stem_map)
+
+# i'm extracting the northing and easting max and min and 
+# adding or subtracting 5 as a buffer
+stem_map.extent <- stem_map@data %>% 
+  group_by(plotid) %>%
+  summarise(northing.max = max(northing) + 5,
+            northing.min = min(northing) - 5,
+            easting.max = max(easting) + 5,
+            easting.min = min(easting) - 5)
+
+names(stem_map.extent) <- c("plotid","yPlus","yMinus","xPlus","xMinus")
+
+yPlus <- stem_map.extent$northing.max
+yMinus <- stem_map.extent$northing.min
+xPlus <- stem_map.extent$easting.max
+xMinus <- stem_map.extent$easting.min
+
+# copying code from group uncertainty
+
+square <- cbind(xMinus, yPlus, 
+                xPlus, yPlus, 
+                xPlus, yMinus, 
+                xMinus, yMinus, 
+                xMinus, yPlus,
+                xMinus, yPlus)
+
+ID <- stem_map.extent$plotid
+
+```
+
+
+## Create spatial polygons using the coordinates
+
+```{r create-spatial-polygons }
+
+# Create a function to do this
+polys <- SpatialPolygons(mapply(function(poly, id) {
+  xy <- matrix(poly, ncol=2, byrow=TRUE)  # take a list and create a matrix
+  Polygons(list(Polygon(xy)), ID=id)
+}, split(square, row(square)), ID),proj4string=CRS(as.character("+proj=utm +zone=11 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0")))
+
+```
+
+## Create shapefile
+
+This is an important step to extract the data.
+
+```{r create-shapefile }
+
+polys.df <- SpatialPolygonsDataFrame(polys, data.frame(id=ID, row.names=ID))
+
+```
+
+## Plot this with our CHM
+
+```{r plot-square-buffers }
+
+plot(chm)
+plot(polys.df, add=TRUE)
+
+polys.df
+
+```
+
+
+
