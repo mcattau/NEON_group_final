@@ -5,6 +5,8 @@ date: "June 23, 2016"
 output: html_document
 ---
 
+### this is a copy of what Megan did before Kristin worked on it
+
 # How do forest charcteristics vary as a function of disturbance history in SOAP, CA?
 
 ## This is the random forest classification that will be used as a metric of forest characteristics
@@ -19,8 +21,6 @@ library(rgdal)
 library(ggplot2)
 library(dplyr)
 library(sp)
-library(neonAOP)
-library(rhdf5)
 # install.packages("randomForest")
 library(randomForest)
 
@@ -79,6 +79,49 @@ summary(soap_HI_PRI)
 HI.data<-brick(soap_HI_NDVI,soap_HI_SAVI, soap_HI_ARVI, soap_HI_EVI,soap_HI_NDLI, soap_HI_NDNI, soap_HI_PRI)
 ```
 
+Put data together in a datacube
+```{r combine data}
+# write a function to compare extents and crop layers if they are different
+same_extent<-function(raster1, raster2) {
+  if (extent(raster1)==extent(raster2)) {
+    print("Rasters have same extent")
+  } else {
+    overlap<-raster::intersect(extent(raster1), extent(raster2))
+    # crop both rasters
+    # might be good to check which is bigger and compare
+    print("Extents are different, Cropping data")
+    raster1<-crop(raster1, overlap)
+    raster2<-crop(raster2, overlap)
+    # create a stack of the new rasters
+  }
+    raster.stack<-stack(raster1, raster2)
+    return(raster.stack)
+}
+
+
+# check our data
+all.data<-stack(HI.data, LiDAR.data)
+all.data
+# no NAs in this dataframe
+```
+
+# Make a df of the indices and examine which are correlated
+```{r corr-variables}
+
+# look at correlation bt variables
+all.data.df<-as.data.frame(all.data)
+cordf<-na.omit(all.data.df)
+str(cordf)
+
+# if more than 0.4, correlated, don't use some or put interaction'
+coor.cordf<-round(cor(cordf),2)
+#export as csv to variables.correlation
+write.csv(coor.cordf,"../Outputs/var_cor_no_reflectance.csv")
+
+
+### ADD REFLECTANCE!!
+```
+
 # Load insitu measurements
 ```{r load_field_measurements}
 # Load insitu veg data
@@ -100,181 +143,25 @@ soap_insitu$taxonid<-gsub("CAIN3", "CEIN3", soap_insitu$taxonid)
 ```
 
 
-## Braziunas edits start here. I'm going to start by importing the index boundaries for the two areas, each with 4 plots, where we are going to pull out hyperspectral data.
-
-```{r import-index-boundaries }
-
-# first import the boundaries
-index.bounds.flight1 <- read.csv("../index_bounds.csv", sep=",")[,2]
-index.bounds.flight2 <- read.csv("../index_bounds2.csv", sep=",")[,2]
-
-```
-
-## Import flightpaths previously identified
-
-```{r import-hsi-flightpaths }
-
-flight1 <- "/Volumes/AOP-NEON1-4/D17/SOAP/2013/SOAP_L1/SOAP_Spectrometer/Reflectance/NIS1_20130612_104651_atmcor.h5"
-
-flight2 <- "/Volumes/AOP-NEON1-4/D17/SOAP/2013/SOAP_L1/SOAP_Spectrometer/Reflectance/NIS1_20130612_104000_atmcor.h5"
-
-```
-
-## Extract bands from flightpaths
-
-```{r extract-bands }
-
-# thanks to Leah, we know which bands are noisy
-# so only importing bands that are not noisy
-
-# grab all bands
-bands <- c(1:192,214:282,316:403)
-
-# set epsg
-epsg <- 32611
-
-# get stack
-all.bands.stack.flight1 <- create_stack(flight1, 
-                         bands, 
-                         epsg,
-                         subset=TRUE,
-                         dims=index.bounds.flight1)
-
-# get stack
-all.bands.stack.flight2 <- create_stack(flight2, 
-                         bands, 
-                         epsg,
-                         subset=TRUE,
-                         dims=index.bounds.flight2)
-
-# check via plotting to make sure we got the right areas
-plot(soap_chm)
-plot(all.bands.stack.flight1[[1]], add=TRUE, col="red")
-plot(all.bands.stack.flight2[[1]], add=TRUE, col="blue")
-
-# also take a look at the wavelength plots
-
-# get spectra for each band
-spectra.flight1 <- extract_av_refl(all.bands.stack.flight1, 
-                           aFun = mean)
-spectra.flight1 <- as.data.frame(spectra.flight1)
-
-# read in the wavelength information from the HDF5 file
-wavelengths<- h5read(flight1, "wavelength")
-
-# convert wavelength to nanometers (nm)
-wavelengths <- wavelengths * 1000
-
-spectra.flight1$wavelength <- wavelengths[bands]
-
-# plot spectra
-qplot(x=spectra.flight1$wavelength,
-      y=spectra.flight1$spectra.flight1,
-      xlab="Wavelength (nm)",
-      ylab="Reflectance",
-      main="Spectra for all pixels\nFlight1",
-      ylim = c(0, .35))
-
-## now flight 2
-# get spectra for each band
-spectra.flight2 <- extract_av_refl(all.bands.stack.flight2, 
-                           aFun = mean)
-spectra.flight2 <- as.data.frame(spectra.flight2)
-
-# read in the wavelength information from the HDF5 file
-wavelengths<- h5read(flight2, "wavelength")
-
-# convert wavelength to nanometers (nm)
-wavelengths <- wavelengths * 1000
-
-spectra.flight2$wavelength <- wavelengths[bands]
-
-wavelengths
-
-# plot spectra
-qplot(x=spectra.flight2$wavelength,
-      y=spectra.flight2$spectra.flight2,
-      xlab="Wavelength (nm)",
-      ylab="Reflectance",
-      main="Spectra for all pixels\nFlight 2",
-      ylim = c(0, .35))
-
-```
-### Braziunas ends here
-
-
-
-Put data together in a datacube
-```{r combine data}
-
-HI.LiDAR.data<-stack(HI.data, LiDAR.data)
-
-# write a function to compare extents and crop layers if they are different
-same_extent<-function(raster1, raster2) {
-  if (extent(raster1)==extent(raster2)) {
-    print("Rasters have same extent")
-  } else {
-    overlap<-raster::intersect(extent(raster1), extent(raster2))
-    # crop both rasters
-    # might be good to check which is bigger and compare
-    print("Extents are different, Cropping data")
-    raster1<-crop(raster1, overlap)
-    raster2<-crop(raster2, overlap)
-    # create a stack of the new rasters
-  }
-    raster.stack<-stack(raster1, raster2)
-    return(raster.stack)
-}
-
-overlap<-raster::intersect(extent(HI.LiDAR.data), extent(all.bands.stack.flight1))
-HI.LiDAR.data<-crop(HI.LiDAR.data, overlap)
-
-# test this
-same_extent(HI.LiDAR.data, all.bands.stack.flight1)
-
-all.data3<-stack(HI.LiDAR.data, all.bands.stack.flight1)
-
-# check our data
-
-all.data<-all.data3
-# no NAs in this dataframe
-```
-
-# Make a df of the indices and examine which are correlated
-```{r corr-variables}
-
-# look at correlation bt variables
-all.data.df<-as.data.frame(all.data)
-cordf<-na.omit(all.data.df)
-str(cordf)
-
-# if more than 0.4, correlated, don't use some or put interaction'
-coor.cordf<-round(cor(cordf),2)
-#export as csv to variables.correlation
-write.csv(coor.cordf,"../Outputs/var_cor_no_reflectance.csv")
-```
-
 Sample HI and LiDAR data at stem points and get training and validation data
 ```{r sample_cube_at_stems}
 
-# Get just the stems that are in flight 1
-stems_flight1<-raster::intersect(soap_insitu, all.data)
-?intersect
-
 # Should we sample at 1m pixel or take neighbors? Look at crown diameter stats to decide
-summary(stems_flight1$maxcanopyd)
+soap_insitu<-soap_insitu[-220,] #remove this NA
+summary(soap_insitu$maxcanopyd)
 # Mean (2.34) and median (1.6) max canopy diameter is over 1m, so sample larger that 1m cell. Create buffers for maxcanopyd/2 for each stem
 #The buffer can be specified as a single value, or as a vector of the length of the number of points
 
-buffers<-(stems_flight1$maxcanopyd)/2
+buffers<-(soap_insitu$maxcanopyd)/2
 
 # sample buffer specific to mean crown width. The small argument returns a number even if the buffer doesn't include a cell center. Use the mean function so if the buffer includes multiple cells, it will take mean value of those cells.
 # sampled_points<-extract(all.data, soap_insitu, buffer=buffers, small=TRUE, fun=mean, na.rm=TRUE)
 # Error: Error in apply(x, 2, fun2) : dim(X) must have a positive length
 
 # work-around for the error that happens above
-sampled_points1<-extract(all.data, stems_flight1, buffer=buffers, small=TRUE)
-
+sampled_points1<-extract(all.data, soap_insitu, buffer=buffers, small=TRUE, na.rm=TRUE)
+# SP = TRUE, make it spatial, ??extract - one that asks it to return the entire df
+# get the mean for each point (buffer) by layer
 
 # The below workaround didn't work:
 # sampled_points2<-lapply(sampled_points1, function(x) ifelse(is.matrix(x), colMeans(x), x))
@@ -282,7 +169,6 @@ sampled_points1<-extract(all.data, stems_flight1, buffer=buffers, small=TRUE)
 
 # install.packages("plyr")
 library("plyr")
-
 
 results.df <- as.data.frame(t(sampled_points1[[1]]))
 for (i in 2:length(sampled_points1)) {
@@ -295,7 +181,7 @@ for (i in 2:length(sampled_points1)) {
 }
 
 # combine
-sampled_points<-cbind(results.df,stems_flight1$taxonid) 
+sampled_points<-cbind(results.df,soap_insitu$taxonid) 
 
 head(sampled_points)
 
@@ -323,10 +209,6 @@ sampled_points2<-lapply(sampled_points1, function(x) ifelse(is.matrix(x), colMea
 ```
 
 
-# rename
-names(sampled_points)[names(sampled_points)=="stems_flight1$taxonid"]<-"SOAP_ID"
-
-ncol(sampled_points)
 Random forest classification
 ```{r random_forest_classification}
 # Machine or ensemble learning method. Can do both regression and classification tasks, and undertakes dimensional reduction methods, treats missing values, outlier values and other essential steps of data exploration. It is a type of ensemble learning method, where multiple CART models are combined
@@ -335,14 +217,13 @@ Random forest classification
 
 set.seed(3693)
 
-fit1 <- randomForest(as.factor(sampled_points$SOAP_ID) ~ .,
+fit1 <- randomForest(as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch + Fare +
+                                            Embarked + Title + FamilySize + FamilyID2,
                       data=sampled_points, 
                       importance=TRUE, 
-                      ntree=5000)
+                      ntree=500)
 # ntree is number of trees to grow
-
-# What variables were important?
-varImpPlot(fit1)
+# 
 
 head(sampled_points)
 x <- cbind(x_train,y_train)
@@ -357,6 +238,5 @@ predicted= predict(fit,x_test)
 ```
 
 # Fin!
-
 
 
