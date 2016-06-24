@@ -1,0 +1,168 @@
+---
+title: "Disturbance History"
+author: "Allie Weill"
+date: "June 23, 2016"
+output: html_document
+---
+```{r load-libraries}
+library(raster)
+library(rgdal)
+library(dismo)
+library(spatial.tools)
+```
+## Load files from the AOP external drive
+```{r load-from-aop}
+setwd("/Volumes/AOP-NEON1-4/D17/SOAP/2013/")
+tileDir <- "/Volumes/AOP-NEON1-4/D17/SOAP/2013/SOAP_L2/SOAP_Spectrometer/Veg_Indices"
+rasterList <- list.files(tileDir, full.names = TRUE, pattern = "\\NDVI.tif$")
+# create a boolean list of rasters in the extent window == 1
+# remove NA and get the final list of rasters to mosaic
+rasterList <- rasterList[!is.na(rasterList)]
+rasterList
+rast.list <- list()
+rast.list
+x=1
+for(aRaster in rasterList) {
+  suppressWarnings(aRaster <- raster(aRaster))
+  if(rotated(aRaster)){
+    print("raster rotation detected - skipping")
+}
+else{
+    rast.list[x] <- stack(aRaster)
+    x <- x + 1
+}
+}
+
+  
+rast.list
+rast.list$fun <- max
+rast.mosaic <- do.call(mosaic, rast.list)
+plot(rast.mosaic)
+```
+
+
+```{r load-files}
+# load and combine raster files
+setwd("/Users/alweill/Documents/data/NEONDI-2016/")
+soap <- rast.mosaic
+plots <- readOGR("/Users/alweill/Documents/data/NEONDI-2016/NEONdata/D17-California/SOAP/vector_data/SOAP_centroids_base/","SOAP_centroids_base")
+#load fire data for CA
+fires <- raster("/Users/alweill/Documents/data/NEONDI-2016/ExtraData/CAfiresRasterP.tif")
+cellStats(fires,range)
+
+# get overlap and crop fire data for soap
+overlap <- intersect(extent(fires),extent(soap))
+fires_soap <- crop(fires,soap)
+head(fires_soap)
+fires_soap[fires_soap==0] <- NA
+#plot fires & soap
+plot(soap, legend=FALSE)
+plot(fires_soap,add=T)
+plot(plots, add=T)
+head(plots)
+head(fires_soap)
+str(fires_soap)
+plot(soap, add=T)
+## generate random plots to sample
+rPoints <- randomPoints(soap,100)
+IDlist <- c(1:100)
+rPlots <- data.frame(IDlist,rPoints)
+rPlots <- SpatialPointsDataFrame(rPoints,rPlots)
+rPlots
+hist(soap)
+```
+```{r extract-data}
+site.fire <- extract(fires_soap, 
+                   rPlots,
+                   buffer = 20,
+                   fun = max,#function is mean value
+                   sp = TRUE, #give spatial object back
+                   stringAsFactors = FALSE)
+site.ht <- extract(soap, 
+                   rPlots,
+                   buffer = 20,
+                   fun = max,#function is mean value
+                   sp = TRUE, #give spatial object back
+                   stringAsFactors = FALSE)
+
+```
+## Merge
+```{r merge-datasets}
+site.ht@data <- data.frame(site.ht@data,
+                           site.fire@data[match(site.ht@data[,"IDlist"],
+                                          site.fire@data$IDlist),])
+site.ht@data$CAfiresRasterP[is.na(site.ht@data$CAfiresRasterP)] <- 0
+# Calculate Time since fire and add as column
+site.ht@data$TSF <- 2016-site.ht@data$CAfiresRasterP/10000
+site.ht@data$TSF[site.ht@data$TSF==2016] <- 100
+# add categorical B vs UB columm
+site.ht$burned <- ifelse(site.ht@data$CAfiresRasterP > 0,"B","U")
+head(site.ht)
+sd(site.ht$layer[site.ht$burned=="B"])
+plot(site.ht@data$burned,site.ht@data$layer,ylim=c(0,50))
+
+str(site.ht$layer)
+                    
+```
+```{r add-regression}
+library(ggplot2)
+p <- ggplot(site.ht@data, aes(x=TSF, y = layer)) +
+  geom_point() +
+  ylab("Max LiDAR Height") +
+  xlab("TSF")+
+   xlim(c(0,110)) +
+  ylim(c(0,50)) +
+  geom_smooth(method=lm)
+
+p + theme(panel.background = element_rect(colour = "grey")) +
+  ggtitle("LiDAR CHM Derived vs Measured Tree Height") +
+  theme(plot.title=element_text(family="sans", face="bold", size=20, vjust=1.9)) +
+  theme(axis.title.y = element_text(family="sans", face="bold", size=14, angle=90, hjust=0.54, vjust=1)) +
+  theme(axis.title.x = element_text(family="sans", face="bold", size=14, angle=00, hjust=0.54, vjust=-.2))
+m <- lm(layer~TSF,site.ht@data)
+summary(m)
+```
+
+## AOP Function
+```{r aop-functions}
+merge_AOP_tiles <- function(rasterList, outFileName){
+  message(paste0("Now running ", basename(rasterList[1])))
+  # get list of files from the server
+  # 
+  
+  # create a boolean list of rasters in the extent window == 1
+  finalList <- lapply(rasterList, rastInClip, clipShp = clipExtent)
+  # remove NA and get the final list of rasters to mosaic
+  finalList <- finalList[!sapply(finalList,is.null)]
+  
+  # # create list of rasters
+  # rast.list <- list()
+  # for(i in 1:length(finalList)) { rast.list[i] <- stack(finalList[i]) }
+  # for(i in 1:length(new)) { rast.list[i] <- stack(new[i]) }
+  
+  # 
+  # crop each raster in list - not sure if it's faster to crop now or after mosaicking
+  # rast.list <- lapply(rast.list, crop, clipExtent)
+  # mosaic rasters
+  # note removed () from the function max call for windows
+  finalList$fun <- max
+  finalList$tolerance <- .5
+  rast.mosaic <- do.call(mosaic, finalList)
+  # plot(rast.mosaic)
+  
+  # write geotiff
+  writeRaster(rast.mosaic,
+              filename=outFileName,
+              format="GTiff",
+              options="COMPRESS=LZW",
+              overwrite = TRUE,
+              NAflag = -9999,
+              datatype="FLT4S") # ensure it's writing to 32 bit
+  
+  # for those who want to plot the final raster to check it out
+  # return(rast.mosaic)
+}
+
+```
+
+
