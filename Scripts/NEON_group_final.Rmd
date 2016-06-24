@@ -39,23 +39,81 @@ hist(soap_slope)
 soap_aspect<-raster("../../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarAspect.tif")
 # look at it
 hist(soap_aspect)
+
+# LiDAR data stack
+LiDAR.data<-brick(soap_chm,soap_slope,soap_aspect)
 ```
 
 Load HI data
 ```{r import_hI}
 # Import the HI data
+# In the absence of reflectance, we've got indices
 soap_HI_NDVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_NDVI.tif")
+plot(soap_HI_NDVI)
+summary(soap_HI_NDVI)
 soap_HI_SAVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_SAVI.tif")
+plot(soap_HI_SAVI)
+summary(soap_HI_SAVI)
 soap_HI_ARVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_ARVI.tif")
+plot(soap_HI_ARVI)
+summary(soap_HI_ARVI)
 soap_HI_EVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_EVI.tif")
+plot(soap_HI_EVI)
+summary(soap_HI_EVI)
 soap_HI_NDLI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_NDLI.tif")
+plot(soap_HI_NDLI)
+summary(soap_HI_NDLI)
 soap_HI_NDNI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_NDNI.tif")
+plot(soap_HI_NDNI)
+summary(soap_HI_NDNI)
 soap_HI_PRI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_PRI.tif")
+plot(soap_HI_PRI)
+summary(soap_HI_PRI)
 
-cor
+# HI data stack
+HI.data<-brick(soap_HI_NDVI,soap_HI_SAVI, soap_HI_ARVI, soap_HI_EVI,soap_HI_NDLI, soap_HI_NDNI, soap_HI_PRI)
+```
+
+Put data together
+```{r combine data}
+# write a function to compare extents and crop layers if they are different
+same_extent<-function(raster1, raster2) {
+  if (extent(raster1)==extent(raster2)) {
+    print("Rasters have same extent")
+  } else {
+    overlap<-raster::intersect(extent(raster1), extent(raster2))
+    # crop both rasters
+    # might be good to check which is bigger and compare
+    print("Extents are different, Cropping data")
+    raster1<-crop(raster1, overlap)
+    raster2<-crop(raster2, overlap)
+    # create a stack of the new rasters
+  }
+    raster.stack<-stack(raster1, raster2)
+    return(raster.stack)
+}
 
 
-### REFLECTANCE?
+# check our data
+all.data<-stack(HI.data, LiDAR.data)
+all.data
+```
+
+# Make a df of the indices and examine which are correlated
+```{r corr-variables}
+
+# look at correlation bt variables
+all.data.df<-as.data.frame(all.data)
+cordf<-na.omit(all.data.df)
+str(cordf)
+
+# if more than 0.4, correlated, don't use some or put interaction'
+coor.cordf<-round(cor(cordf),2)
+#export as csv to variables.correlation
+write.csv(coor.cordf,"../Outputs/var_cor_no_reflectance.csv")
+
+
+### ADD REFLECTANCE!!
 ```
 
 # Load insitu measurements
