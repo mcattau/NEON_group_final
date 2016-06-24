@@ -349,6 +349,16 @@ fit1 <- randomForest(as.factor(sampled_points$SOAP_ID) ~ .,
                       ntree=5000)
 # ntree is number of trees to grow
 
+# there are 11 species in this plot
+length(unique(as.factor(sampled_points$SOAP_ID)))
+
+# Here is a confusion matrix that shows how confused the classes are with one another
+print(fit1)
+
+# estimate of  error rate is 37.88%
+# This shows you error per species
+plot(fit1)
+
 # What variables were important?
 varImpPlot(fit1)
 
