@@ -1,0 +1,206 @@
+
+---
+title: "NEON_group_final"
+author: "Megan Cattau, Kristin Braziunas"
+date: "June 23, 2016"
+output: html_document
+---
+
+# How do forest charcteristics vary as a function of disturbance history in SOAP, CA?
+
+## This is the random forest classification that will be used as a metric of forest characteristics
+
+```{r load_packages}
+# Check working directory
+getwd()
+
+# Load our packages
+library(raster)
+library(rgdal)
+library(ggplot2)
+library(dplyr)
+library(sp)
+library(neonAOP)
+library(rhdf5)
+# install.packages("randomForest")
+library(randomForest)
+
+setwd("C:/Users/stellac/Box Sync/Work/neonwksp/data/NEONDI-2016/NEON_group_final/Scripts")
+```
+
+### Load data
+Load LiDAR data - CHM, Slope, and Aspect
+```{r load_LiDAR_data}
+# Load LiDAR CHM raster
+soap_chm<-raster("../../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarCHM.tif")
+# look at it
+hist(soap_chm)
+summary(soap_chm)
+# Load LiDAR Slope raster
+soap_slope<-raster("../../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarSlope.tif")
+# look at it
+hist(soap_slope)
+summary(soap_slope)
+# Load LiDAR Aspect raster
+soap_aspect<-raster("../../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarAspect.tif")
+# look at it
+hist(soap_aspect)
+summary(soap_aspect)
+# LiDAR data stack
+LiDAR.data<-brick(soap_chm,soap_slope,soap_aspect)
+```
+
+Load HI data
+```{r import_hI}
+# Import the HI data
+# In the absence of reflectance, we've got indices
+soap_HI_NDVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_NDVI.tif")
+plot(soap_HI_NDVI)
+summary(soap_HI_NDVI)
+soap_HI_SAVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_SAVI.tif")
+plot(soap_HI_SAVI)
+summary(soap_HI_SAVI)
+soap_HI_ARVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_ARVI.tif")
+plot(soap_HI_ARVI)
+summary(soap_HI_ARVI)
+soap_HI_EVI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_EVI.tif")
+plot(soap_HI_EVI)
+summary(soap_HI_EVI)
+soap_HI_NDLI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_NDLI.tif")
+plot(soap_HI_NDLI)
+summary(soap_HI_NDLI)
+soap_HI_NDNI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_NDNI.tif")
+plot(soap_HI_NDNI)
+summary(soap_HI_NDNI)
+soap_HI_PRI<-raster("../../NEONdata/D17-California/SOAP/2013/spectrometer/veg_index/SOAP_PRI.tif")
+plot(soap_HI_PRI)
+summary(soap_HI_PRI)
+
+# HI data stack
+HI.data<-brick(soap_HI_NDVI,soap_HI_SAVI, soap_HI_ARVI, soap_HI_EVI,soap_HI_NDLI, soap_HI_NDNI, soap_HI_PRI)
+```
+
+# Load insitu measurements
+```{r load_field_measurements}
+# Load insitu veg data
+# soap_insitu1<-read.csv("../../NEONdata/D17-California/SOAP/2013/insitu/veg-structure/D17_2013_SOAP_vegStr.csv", stringsAsFactors = FALSE)
+# we don't need the above because the same info is in the below
+
+soap_insitu<-readOGR("../../NEONdata/D17-California/SOAP/2013/insitu/veg-structure", "soap_stems")
+names(soap_insitu)
+str(soap_insitu)
+
+# How many species are there at this site?
+length(unique(soap_insitu$taxonid))
+length(unique(soap_insitu$scientific))
+
+# The data says there are 17 taxonids and 16 spp, so we needed to fix the erroneous taxonid
+
+soap_insitu$taxonid<-gsub("CAIN3", "CEIN3", soap_insitu$taxonid)
+# It's fixed! Now there are 16 taxonids and 16 scientific names
+```
+
+
+## Braziunas edits start here. I'm going to start by importing the index boundaries for the two areas, each with 4 plots, where we are going to pull out hyperspectral data.
+
+```{r import-index-boundaries }
+
+# first import the boundaries
+index.bounds.flight1 <- read.csv("../index_bounds.csv", sep=",")[,2]
+index.bounds.flight2 <- read.csv("../index_bounds2.csv", sep=",")[,2]
+
+```
+
+## Import flightpaths previously identified
+
+```{r import-hsi-flightpaths }
+
+flight1 <- "/Volumes/AOP-NEON1-4/D17/SOAP/2013/SOAP_L1/SOAP_Spectrometer/Reflectance/NIS1_20130612_104651_atmcor.h5"
+
+flight2 <- "/Volumes/AOP-NEON1-4/D17/SOAP/2013/SOAP_L1/SOAP_Spectrometer/Reflectance/NIS1_20130612_104000_atmcor.h5"
+
+```
+
+## Extract bands from flightpaths
+
+```{r extract-bands }
+
+# thanks to Leah, we know which bands are noisy
+# so only importing bands that are not noisy
+
+# grab all bands
+bands <- c(1:192,214:282,316:403)
+
+# set epsg
+epsg <- 32611
+
+# get stack
+all.bands.stack.flight1 <- create_stack(flight1, 
+                         bands, 
+                         epsg,
+                         subset=TRUE,
+                         dims=index.bounds.flight1)
+
+# get stack
+all.bands.stack.flight2 <- create_stack(flight2, 
+                         bands, 
+                         epsg,
+                         subset=TRUE,
+                         dims=index.bounds.flight2)
+
+# check via plotting to make sure we got the right areas
+plot(soap_chm)
+plot(all.bands.stack.flight1[[1]], add=TRUE, col="red")
+plot(all.bands.stack.flight2[[1]], add=TRUE, col="blue")
+
+# also take a look at the wavelength plots
+
+# get spectra for each band
+spectra.flight1 <- extract_av_refl(all.bands.stack.flight1, 
+                           aFun = mean)
+spectra.flight1 <- as.data.frame(spectra.flight1)
+
+# read in the wavelength information from the HDF5 file
+wavelengths<- h5read(flight1, "wavelength")
+
+# convert wavelength to nanometers (nm)
+wavelengths <- wavelengths * 1000
+
+spectra.flight1$wavelength <- wavelengths[bands]
+
+# plot spectra
+qplot(x=spectra.flight1$wavelength,
+      y=spectra.flight1$spectra.flight1,
+      xlab="Wavelength (nm)",
+      ylab="Reflectance",
+      main="Spectra for all pixels\nFlight1",
+      ylim = c(0, .35))
+
+## now flight 2
+# get spectra for each band
+spectra.flight2 <- extract_av_refl(all.bands.stack.flight2, 
+                           aFun = mean)
+spectra.flight2 <- as.data.frame(spectra.flight2)
+
+# read in the wavelength information from the HDF5 file
+wavelengths<- h5read(flight2, "wavelength")
+
+# convert wavelength to nanometers (nm)
+wavelengths <- wavelengths * 1000
+
+spectra.flight2$wavelength <- wavelengths[bands]
+
+wavelengths
+
+# plot spectra
+qplot(x=spectra.flight2$wavelength,
+      y=spectra.flight2$spectra.flight2,
+      xlab="Wavelength (nm)",
+      ylab="Reflectance",
+      main="Spectra for all pixels\nFlight 2",
+      ylim = c(0, .35))
+
+```
+### Braziunas ends here
+
+
