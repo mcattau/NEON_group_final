@@ -23,6 +23,9 @@ library(neonAOP)
 library(rhdf5)
 # install.packages("randomForest")
 library(randomForest)
+# install.packages("party")
+library(party)
+library(rpart)
 
 setwd("~/Documents/data/NEONDI-2016/NEON_group_final/Scripts/")
 ```
@@ -259,7 +262,7 @@ Sample HI and LiDAR data at stem points and get training and validation data
 
 # Get just the stems that are in flight 1
 stems_flight1<-raster::intersect(soap_insitu, all.data)
-?intersect
+# ?intersect
 
 # Should we sample at 1m pixel or take neighbors? Look at crown diameter stats to decide
 summary(stems_flight1$maxcanopyd)
@@ -299,11 +302,12 @@ sampled_points<-cbind(results.df,stems_flight1$taxonid)
 
 head(sampled_points)
 
-?extract
+# ?extract
 ### check this out to see if it makes sense. For example, measured tree height vs. sampled tree height and compare w just using global buffer radius
+# ?lapply
 
 ```
-?lapply
+
 
 Function to sample all rasters bc extract doesn't work on rasterstacks
 ```{r raster_sample_function}
@@ -313,20 +317,24 @@ sample_rasters<-function(rasterlist){
   sampled_points<-do.call(rbind, sampled_points2)
 }
   
-  breaks_quant<-function(chm){
+breaks_quant<-function(chm){
   breaks<-c(quantile(chm)[2], quantile(chm)[3], quantile(chm)[5])
   return(breaks)
 }
 
 sampled_points2<-lapply(sampled_points1, function(x) ifelse(is.matrix(x), colMeans(x, na.rm=TRUE), x))
-?do.call
+# ?do.call
 ```
 
+```{r rename-column }
 
 # rename
 names(sampled_points)[names(sampled_points)=="stems_flight1$taxonid"]<-"SOAP_ID"
 
 ncol(sampled_points)
+
+```
+
 Random forest classification
 ```{r random_forest_classification}
 # Machine or ensemble learning method. Can do both regression and classification tasks, and undertakes dimensional reduction methods, treats missing values, outlier values and other essential steps of data exploration. It is a type of ensemble learning method, where multiple CART models are combined
@@ -344,16 +352,51 @@ fit1 <- randomForest(as.factor(sampled_points$SOAP_ID) ~ .,
 # What variables were important?
 varImpPlot(fit1)
 
-head(sampled_points)
-x <- cbind(x_train,y_train)
-# Fitting model
-fit <- randomForest(Species ~ ., x,ntree=500)
-summary(fit)
-#Predict Output 
-predicted= predict(fit,x_test)
+```
+
+## Now use party package to visualize tree
+
+```{r visualize-trees}
+
+set.seed(555)
+
+# rerun random forest using cforest function from party package
+temp <- cforest(as.factor(sampled_points$SOAP_ID) ~ SOAP_NDLI + SOAP_lidarSlope + nm_382 + SOAP_NDNI + nm_387 + SOAP_SAVI, data=sampled_points,
+        controls=cforest_control(mtry=2, mincriterion=0))
+
+# run script from online to make tree diagram
+cforest
+pt <- party:::prettytree(temp@ensemble[[1]], names(temp@data@get("input"), ilevels=temp@data[[1]]))
+
+temp2 <- pre
 
 
+temp@data@formula$input[[2]]
+str(temp@data)
 
+pt <- party:::prettytree(temp@ensemble[[1]], names(temp@data@get("input")))
+pt
+nt <- new("BinaryTree")
+nt@tree <- pt
+nt@data <- temp@data
+nt@responses <- temp@responses
+nt
+plot(nt) 
+
+# now we have to prune the tree
+
+## try rpart
+library(rpart)
+?rpart
+temp2 <- rpart(as.factor(sampled_points$SOAP_ID) ~ ., 
+               data=sampled_points,
+               method="class") 
+printcp(temp2)
+plot(temp2)
+text(temp2)
+
+sampled_points
+str(sampled_points$SOAP_ID)
 ```
 
 # Fin!
