@@ -1,0 +1,53 @@
+---
+title: ""
+date: "`r Sys.Date()`"
+output:
+  ioslides_presentation
+---
+
+
+```{r knitr_init, echo=FALSE, cache=FALSE, warnings = FALSE}
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=FALSE,
+	             cache=TRUE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=TRUE)
+opts_knit$set(width=75)
+```
+
+
+# In the morning
+
+## Getting up
+
+- Turn off alarm
+- Get out of bed
+- NPR times
+
+## Breakfast
+
+- Eat eggs
+- Drink coffee
+
+# In the evening
+
+## Dinner
+
+- Eat spaghetti
+- Drink wine
+
+----
+
+![picture of a lovely plant](Outputs/chlorogalum.jpg)
+
+## Going to sleep
+
+- Get in bed
+- Count sheep
