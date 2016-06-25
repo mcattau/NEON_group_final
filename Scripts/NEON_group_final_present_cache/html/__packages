@@ -1,0 +1,16 @@
+base
+knitr
+rmdformats
+sp
+raster
+rgdal
+ggplot2
+ggthemes
+dplyr
+neonAOP
+rhdf5
+randomForest
+lattice
+RColorBrewer
+latticeExtra
+rasterVis

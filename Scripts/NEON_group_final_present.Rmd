@@ -26,6 +26,8 @@ opts_knit$set(width=75)
 
 # How do forest charcteristics vary with respect to disturbance history at Soaproot Saddle?
 
+![](../Outputs/chlorogalum.jpg)
+
 ### _Using random forests to classify remotely sensed forest characteristics_
 
 ```{r load_packages, echo = FALSE, message = FALSE, warning=FALSE}
@@ -211,7 +213,7 @@ polys.df <- SpatialPolygonsDataFrame(polys, data.frame(id=ID, row.names=ID))
 ```{r plot-square-buffers}
 
 plot(chm, main =  "Bootstrapped plot polygons for Soaproot Saddle", col = bpy.colors())
-plot(polys.df, add=TRUE)
+plot(polys.df, add=TRUE, col = "springgreen", size = 2)
 
 ```
 
@@ -299,7 +301,7 @@ flight1.plots <- raster::intersect(polys.df, flight1)
 
 # check this subset
 plot(chm, col = bpy.colors(), main = "SOAP CHM")
-plot(flight1.plots, add=TRUE)
+plot(flight1.plots, add=TRUE, col= "white")
 
 ```
 
@@ -395,7 +397,7 @@ rgb.bands.stack.flight1 <- create_stack(flight1,
   
 ## 10. Examine the spectra to be used for analysis 
   
-```{r inspect-spectral-location}
+```{r inspect-spectral-location, fig.height = 6}
 # check via plotting to make sure we got the right areas
 plot(soap_chm,xlim = c(296800,298000), col = bpy.colors(), main = "SW corner of Soaproot Saddle n/ Flight Path 1")
 #extent of the hsi flight stack
@@ -432,7 +434,7 @@ spectra_plot + theme_few()
 
 ##Next: why this pattern? Is it related to a disturbance?
 
-![](../Outputs/chlorogalum.jpg)
+
 
 ###The end. 
 
