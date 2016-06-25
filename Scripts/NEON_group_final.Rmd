@@ -23,6 +23,9 @@ library(neonAOP)
 library(rhdf5)
 # install.packages("randomForest")
 library(randomForest)
+# install.packages("party")
+library(party)
+library(rpart)
 
 setwd("~/Documents/data/NEONDI-2016/NEON_group_final/Scripts/")
 ```
@@ -204,7 +207,8 @@ qplot(x=spectra.flight2$wavelength,
 
 
 
-Put data together in a datacube
+## Put LiDAR and HSI data together in a datacube
+
 ```{r combine data}
 
 HI.LiDAR.data<-stack(HI.data, LiDAR.data)
@@ -240,7 +244,8 @@ all.data<-all.data3
 # no NAs in this dataframe
 ```
 
-# Make a df of the indices and examine which are correlated
+##  Make a df of the indices and examine which are correlated
+
 ```{r corr-variables}
 
 # look at correlation bt variables
@@ -251,28 +256,31 @@ str(cordf)
 # if more than 0.4, correlated, don't use some or put interaction'
 coor.cordf<-round(cor(cordf),2)
 #export as csv to variables.correlation
-write.csv(coor.cordf,"../Outputs/var_cor_no_reflectance.csv")
+# write.csv(coor.cordf,"../Outputs/var_cor_no_reflectance.csv")
+
 ```
 
-Sample HI and LiDAR data at stem points and get training and validation data
+## Sample HSI and LiDAR data at stem points and get training and validation data
+
 ```{r sample_cube_at_stems}
 
+# Get just the stems that are in flight 1
+stems_flight1<-raster::intersect(soap_insitu, all.data)
+# ?intersect
+
 # Should we sample at 1m pixel or take neighbors? Look at crown diameter stats to decide
-soap_insitu<-soap_insitu[-220,] #remove this NA
-summary(soap_insitu$maxcanopyd)
+summary(stems_flight1$maxcanopyd)
 # Mean (2.34) and median (1.6) max canopy diameter is over 1m, so sample larger that 1m cell. Create buffers for maxcanopyd/2 for each stem
 #The buffer can be specified as a single value, or as a vector of the length of the number of points
 
-buffers<-(soap_insitu$maxcanopyd)/2
+buffers<-(stems_flight1$maxcanopyd)/2
 
 # sample buffer specific to mean crown width. The small argument returns a number even if the buffer doesn't include a cell center. Use the mean function so if the buffer includes multiple cells, it will take mean value of those cells.
 # sampled_points<-extract(all.data, soap_insitu, buffer=buffers, small=TRUE, fun=mean, na.rm=TRUE)
 # Error: Error in apply(x, 2, fun2) : dim(X) must have a positive length
 
 # work-around for the error that happens above
-sampled_points1<-extract(all.data, soap_insitu, buffer=buffers, small=TRUE, na.rm=TRUE)
-# SP = TRUE, make it spatial, ??extract - one that asks it to return the entire df
-# get the mean for each point (buffer) by layer
+sampled_points1<-extract(all.data, stems_flight1, buffer=buffers, small=TRUE)
 
 # The below workaround didn't work:
 # sampled_points2<-lapply(sampled_points1, function(x) ifelse(is.matrix(x), colMeans(x), x))
@@ -280,6 +288,7 @@ sampled_points1<-extract(all.data, soap_insitu, buffer=buffers, small=TRUE, na.r
 
 # install.packages("plyr")
 library("plyr")
+
 
 results.df <- as.data.frame(t(sampled_points1[[1]]))
 for (i in 2:length(sampled_points1)) {
@@ -292,35 +301,26 @@ for (i in 2:length(sampled_points1)) {
 }
 
 # combine
-sampled_points<-cbind(results.df,soap_insitu$taxonid) 
+sampled_points<-cbind(results.df,stems_flight1$taxonid) 
 
 head(sampled_points)
 
-?extract
 ### check this out to see if it makes sense. For example, measured tree height vs. sampled tree height and compare w just using global buffer radius
 
 ```
-?lapply
 
-Function to sample all rasters bc extract doesn't work on rasterstacks
-```{r raster_sample_function}
-# Function to sample each raster
-sample_rasters<-function(rasterlist){
-  samples<-extract(raster1, soap_insitu, buffer=buffers, small=TRUE, fun=mean, na.rm=TRUE)
-  sampled_points<-do.call(rbind, sampled_points2)
-}
-  
-  breaks_quant<-function(chm){
-  breaks<-c(quantile(chm)[2], quantile(chm)[3], quantile(chm)[5])
-  return(breaks)
-}
 
-sampled_points2<-lapply(sampled_points1, function(x) ifelse(is.matrix(x), colMeans(x, na.rm=TRUE), x))
-?do.call
+```{r rename-column }
+
+# rename
+names(sampled_points)[names(sampled_points)=="stems_flight1$taxonid"]<-"SOAP_ID"
+
+ncol(sampled_points)
+
 ```
 
+## Random forest classification
 
-Random forest classification
 ```{r random_forest_classification}
 # Machine or ensemble learning method. Can do both regression and classification tasks, and undertakes dimensional reduction methods, treats missing values, outlier values and other essential steps of data exploration. It is a type of ensemble learning method, where multiple CART models are combined
 
@@ -328,25 +328,37 @@ Random forest classification
 
 set.seed(3693)
 
-fit1 <- randomForest(as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch + Fare +
-                                            Embarked + Title + FamilySize + FamilyID2,
+fit1 <- randomForest(as.factor(sampled_points$SOAP_ID) ~ .,
                       data=sampled_points, 
                       importance=TRUE, 
-                      ntree=500)
+                      ntree=5000)
 # ntree is number of trees to grow
-# 
 
-head(sampled_points)
-x <- cbind(x_train,y_train)
-# Fitting model
-fit <- randomForest(Species ~ ., x,ntree=500)
-summary(fit)
-#Predict Output 
-predicted= predict(fit,x_test)
+# What variables were important?
+varImpPlot(fit1)
 
+```
 
+## Now try some other packages to visualize trees
+
+Note that other packages process trees differently than randomForest.
+
+```{r visualize-trees}
+
+## try rpart
+library(rpart)
+
+soap.rpart <- rpart(as.factor(sampled_points$SOAP_ID) ~ ., 
+               data=sampled_points,
+               method="class") 
+printcp(soap.rpart)
+
+plot(soap.rpart)
+text(soap.rpart)
 
 ```
 
 # Fin!
+
+
 

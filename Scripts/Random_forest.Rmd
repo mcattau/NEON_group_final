@@ -1,21 +1,11 @@
 ---
 title: "NEON_group_final"
 author: "Megan Cattau"
-date: "June 24, 2016"
+date: "June 23, 2016"
 output: html_document
 ---
 
-This is the random forest Classification, and requires pre-processing from NEON_group_final.Rd in the Scripts folder
 
-sampled_points
-sampled_points<-sampled_points[complete.cases(sampled_points),]
-# are all NAs gone? (are all returns of 'is this na?' false?)
-test<-all(is.na(sampled_points)==FALSE)
-
-# rename
-names(sampled_points)<-c("SOAP_NDVI","SOAP_SAVI", "SOAP_ARVI", "SOAP_EVI", "SOAP_NDLI", "SOAP_NDNI", "SOAP_PRI", "SOAP_lidarCHM","SOAP_lidarSlope", "SOAP_lidarAspect","SOAP_ID")
-
-Random forest classification
 ```{r random_forest_classification}
 # Machine or ensemble learning method. Can do both regression and classification tasks, and undertakes dimensional reduction methods, treats missing values, outlier values and other essential steps of data exploration. It is a type of ensemble learning method, where multiple CART models are combined
 
@@ -23,29 +13,20 @@ Random forest classification
 
 set.seed(3693)
 
-fit1 <- randomForest(as.factor(SOAP_ID) ~ SOAP_NDVI + SOAP_SAVI + SOAP_ARVI + SOAP_EVI + SOAP_NDLI + SOAP_NDNI + SOAP_PRI + SOAP_lidarCHM + SOAP_lidarSlope + SOAP_lidarAspect,
+fit1 <- randomForest(as.factor(sampled_points$SOAP_ID) ~ .,
                       data=sampled_points, 
                       importance=TRUE, 
-                      ntree=500)
+                      ntree=5000)
 # ntree is number of trees to grow
-
-summary(fit1)
 
 # What variables were important?
 varImpPlot(fit1)
-
-head(sampled_points)
-x <- cbind(x_train,y_train)
-# Fitting model
-fit <- randomForest(Species ~ ., x,ntree=500)
-summary(fit)
-#Predict Output 
-predicted= predict(fit,x_test)
 
 
 
 ```
 
 # Fin!
+
 
 
