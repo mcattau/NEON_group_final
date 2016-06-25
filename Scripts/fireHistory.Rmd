@@ -11,10 +11,10 @@ library(dismo)
 library(spatial.tools)
 ```
 ## Load files from the AOP external drive
-```{r load-from-aop}
+```{r load-from-aop, eval=FALSE}
 setwd("/Volumes/AOP-NEON1-4/D17/SOAP/2013/")
-tileDir <- "/Volumes/AOP-NEON1-4/D17/SOAP/2013/SOAP_L2/SOAP_Spectrometer/Veg_Indices"
-rasterList <- list.files(tileDir, full.names = TRUE, pattern = "\\NDNI.tif$")
+tileDir <- "/Volumes/AOP-NEON1-4/D17/SOAP/2013/SOAP_L3/SOAP_Lidar/CHM/"
+rasterList <- list.files(tileDir, full.names = TRUE, pattern = "\\.tif$")
 # create a boolean list of rasters in the extent window == 1
 # remove NA and get the final list of rasters to mosaic
 rasterList <- rasterList[!is.na(rasterList)]
@@ -36,53 +36,61 @@ rast.list
 rast.list$fun <- max
 rast.mosaic <- do.call(mosaic, rast.list)
 plot(rast.mosaic)
+writeRaster(rast.mosaic,
+            filename="/Volumes/AOP-NEON1-4/D17/SOAP/2013/SOAP_L3/SOAP_Lidar/CHM/SOAP_CHM.tif",
+            format="GTiff",
+            options="COMPRESS=LZW",
+            overwrite = TRUE,
+            NAflag = -9999)
 ```
 
 
 ```{r load-fire-file}
 # load and combine raster files
-setwd("/Users/alweill/Documents/data/NEONDI-2016/")
-soap <- rast.mosaic
 #load fire data for CA
 fires <- raster("/Users/alweill/Documents/data/NEONDI-2016/ExtraData/CAfiresP2.tif")
 cellStats(fires,range)
 ```
 
-```{r crop-fires}
+```{r crop-fires, eval=FALSE}
 
 plot(soap)
 fires_soap <- crop(fires,soap)
 fires_soap <- spatial_sync_raster(fires_soap,soap)
+writeRaster(rast.mosaic,
+            filename="/Users/alweill/Documents/data/NEONDI-2016/ExtraData/SOAP_fires.tif",
+            format="GTiff",
+            options="COMPRESS=LZW",
+            overwrite = TRUE,
+            NAflag = -9999)
 extent(fires_soap)
+```
+
+
+
+```{r read-rasters}
 #plot fires & soap
-plot(soap, legend=FALSE)
-plot(fires_soap, add=T)
-plot(rPlots,add=T)
-text(rPlots,labels=rPlots$IDlist)
-head(plots)
-head(fires_soap)
-cellStats(fires,max)
-plot(soap, add=T)
-rStack <- stack(soap,fires_soap)
+soap <- raster("/Volumes/AOP-NEON1-4/D17/SOAP/2013/SOAP_L3/SOAP_Lidar/CHM/SOAP_CHM.tif")
+fires_soap <- raster("/Users/alweill/Documents/data/NEONDI-2016/ExtraData/SOAP_fires.tif")
 ```
 
 ```{r generate-random-plots}
 ## generate random plots to sample
-rPoints <- randomPoints(soap,30)
-rPoints
-IDlist <- c(1:30)
+rPoints <- randomPoints(soap,50)
+IDlist <- c(1:50)
 rPlots <- data.frame(IDlist,rPoints)
 rPlots <- SpatialPointsDataFrame(rPoints,rPlots)
-rPlots
 ```
-```{r get-six-plots}
+
+
+```{r get-six-plots, eval=FALSE}
 ## set plots to be the 6 boundary plots that match up with real field data
 allPlots <- readOGR("/Users/alweill/Documents/data/NEONDI-2016/NEONdata/D17-California/SOAP/vector_data/SOAP_centroids_base/SOAP_base_centroids/","SOAP_base_centroids")
 rPlots <- allPlots
 
 ```
 
-```{r read-veg-data}
+```{r read-veg-data, eval=FALSE}
 setwd("/Volumes/AOP-NEON1-4/D17/SOAP/2013/")
 vegdata <- read.csv("/Volumes/AOP-NEON1-4/D17/Field_Data/2013/Sampling_Data/")
 SOAPveg <- vegdata[vegdata$siteid=="SOAP",]
@@ -94,6 +102,13 @@ rPlots <- SpatialPointsDataFrame(rPoints,rPlots)
 
 ```
 
+```{r plot}
+plot(soap)
+plot(rPlots,add=T)
+plot(fires_soap)
+plot(rPlots,add=T)
+rStack <- stack(soap,fires_soap)
+```
 
 ```{r extract-data}
 eStack <- extract(rStack, 
@@ -102,40 +117,35 @@ eStack <- extract(rStack,
                    fun = max,#function is mean value
                    sp = TRUE, #give spatial object back
                    stringAsFactors = FALSE)
-#w <- rPlots[rPlots$M_Order==255,]
 
 ```
 
-```{r add-to-datasets}
-# Calculate Time since fire and add as column
-eStack@data$TSF <- 2016-eStack@data$CAfiresP2/10000
-eStack@data$TSF[eStack@data$TSF==2016] <- NA
-# add categorical B vs UB columm
-eStack@data$burned <- ifelse(eStack@data$CAfiresP2>0,"B","UB")
-eStack$burned
-un <- eStack[eStack$M_Order==255,]
-head(un)
+```{r add-to-datasets,error=TRUE}
 ## create smaller dataframe to plot
-temp <- data.frame(eStack@data$burned,eStack@data$layer,eStack@data$TSF,as.character(eStack@data$CAfiresP2/10000))
-names(temp) <- c("Burned","Layer","TSF","Year")
-par(mfrow=c(1,2))
-plot(temp$Year,temp$Layer)
-plot(temp$Burned,temp$Layer)
-                    
+TSF <- ifelse(eStack$CAfiresP2 > 0, (2016-eStack$CAfiresP2/10000), NA)
+Burned <- ifelse(eStack$CAfiresP2 > 0,"B","UB")
+Burned[is.na(Burned)] <- "UB"
+Layer <- eStack@data$layer
+Year <- ifelse(eStack$CAfiresP2 > 0, as.character(eStack@data$CAfiresP2/10000),0)
+Year[is.na(Year)] <- 0
+temp <- data.frame(Layer,Year,TSF,Burned)
+plot(temp$Year,temp$Layer, main ="CHM by year of last fire")
+plot(temp$Burned,temp$Layer, main="CHM by burn status")
+                  
 ```
 
-```{r add-regression}
+```{r add-regression, eval=FALSE}
 library(ggplot2)
 p <- ggplot(temp, aes(x=TSF, y = Layer)) +
   geom_point() +
   ylab("Max LiDAR Height") +
   xlab("TSF")+
-   xlim(c(50,100)) +
-  ylim(c(0,1)) +
+   xlim(c(60,100)) +
+  ylim(c(0,20)) +
   geom_smooth(method=lm)
 
 p + theme(panel.background = element_rect(colour = "grey")) +
-  ggtitle("Layer Derived vs TSF") +
+  ggtitle("CHM vs TSF") +
   theme(plot.title=element_text(family="sans", face="bold", size=20, vjust=1.9)) +
   theme(axis.title.y = element_text(family="sans", face="bold", size=14, angle=90, hjust=0.54, vjust=1)) +
   theme(axis.title.x = element_text(family="sans", face="bold", size=14, angle=00, hjust=0.54, vjust=-.2))
@@ -143,45 +153,4 @@ m <- lm(Layer~Year,temp)
 summary(m)
 ```
 
-## AOP Function
-```{r aop-functions}
-merge_AOP_tiles <- function(rasterList, outFileName){
-  message(paste0("Now running ", basename(rasterList[1])))
-  # get list of files from the server
-  # 
-  
-  # create a boolean list of rasters in the extent window == 1
-  finalList <- lapply(rasterList, rastInClip, clipShp = clipExtent)
-  # remove NA and get the final list of rasters to mosaic
-  finalList <- finalList[!sapply(finalList,is.null)]
-  
-  # # create list of rasters
-  # rast.list <- list()
-  # for(i in 1:length(finalList)) { rast.list[i] <- stack(finalList[i]) }
-  # for(i in 1:length(new)) { rast.list[i] <- stack(new[i]) }
-  
-  # 
-  # crop each raster in list - not sure if it's faster to crop now or after mosaicking
-  # rast.list <- lapply(rast.list, crop, clipExtent)
-  # mosaic rasters
-  # note removed () from the function max call for windows
-  finalList$fun <- max
-  finalList$tolerance <- .5
-  rast.mosaic <- do.call(mosaic, finalList)
-  # plot(rast.mosaic)
-  
-  # write geotiff
-  writeRaster(rast.mosaic,
-              filename=outFileName,
-              format="GTiff",
-              options="COMPRESS=LZW",
-              overwrite = TRUE,
-              NAflag = -9999,
-              datatype="FLT4S") # ensure it's writing to 32 bit
-  
-  # for those who want to plot the final raster to check it out
-  # return(rast.mosaic)
-}
-
-```
 
