@@ -17,6 +17,201 @@ library(ggplot2)
 
 ```
 
+## Identify plot boundaries
+
+We wanted to match up our in situ data with the hyperspectral data so that we could subset a hyperspectral flight line. As a first step, we identified plot boundaries based on the stem locations in the in situ data.
+
+## First, we load the in situ data as a shapefile
+
+```{r load-insitu-data }
+
+stem.map <- readOGR("../NEONdata/D17-California/SOAP/2013/insitu/veg-structure",
+                    "soap_stems")
+
+# look at a plot
+plot(chm)
+plot(stem.map, add=TRUE)
+
+```
+
+## Use stem locations to create plot boundaries
+
+```{r create-plot-boundaries }
+
+# group stems by plotid, record the max and min northing and easting values
+# this will be used later to create a shapefile for plot boundaries
+stem.map.extent <- stem.map@data %>% 
+  group_by(plotid) %>%
+  summarise(northing.max = max(northing) + 5,
+            northing.min = min(northing) - 5,
+            easting.max = max(easting) + 5,
+            easting.min = min(easting) - 5)
+
+# assign new variables for use with previously created code
+yPlus <- stem.map.extent$northing.max
+yMinus <- stem.map.extent$northing.min
+xPlus <- stem.map.extent$easting.max
+xMinus <- stem.map.extent$easting.min
+
+# code from NEON tutorial on creating square plot extents
+square <- cbind(xMinus, yPlus, 
+                xPlus, yPlus, 
+                xPlus, yMinus, 
+                xMinus, yMinus, 
+                xMinus, yPlus)
+
+ID <- stem.map.extent$plotid
+
+```
+
+## Create spatial polygons using the coordinates
+
+```{r create-spatial-polygons }
+
+# Create a function to do this
+polys <- SpatialPolygons(mapply(function(poly, id) {
+  xy <- matrix(poly, ncol=2, byrow=TRUE)  # take a list and create a matrix
+  Polygons(list(Polygon(xy)), ID=id)
+}, split(square, row(square)), ID),proj4string=CRS(as.character("+proj=utm +zone=11 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0")))
+
+```
+
+## Create shapefile
+
+```{r create-shapefile }
+
+polys.df <- SpatialPolygonsDataFrame(polys, data.frame(id=ID, row.names=ID))
+
+```
+
+## Plot this with our CHM
+
+```{r plot-square-buffers }
+
+plot(chm)
+plot(polys.df, add=TRUE)
+
+```
+
+## Look at all the hyperspectral flightlines
+
+We used Leah's code to look through all the hyperspectral flightlines. I'm not going to rehash it all here, but we decided to narrow down to one flightline that covered 4 plots.
+
+We also used Leah's code to get extents for all flightlines and saved this on our local computer.
+
+## Set data directory to access hyperspectral flightline from hard drive
+
+```{r set-data-directory }
+
+## SOAP Clip
+# the name of the site
+site <- "SOAP"
+domain <- "D17"
+fullDomain <- "D17-California"
+level <- "L1"
+dataType <- "Spectrometer"
+level <- paste0(site,"_L1")
+year <- "2013"
+productType <- paste0(site,"_", dataType)
+dataProduct <- "Reflectance"
+
+drivePath <- "Volumes"
+driveName <- "AOP-NEON1-4"
+
+dataDir <- file.path(drivePath, driveName,
+                      domain,
+                      site, year, level, productType, dataProduct)
+dataDir <- paste0("/", dataDir)
+
+```
+
+## Import flightline
+
+The right boundary of the flightline appears on the plot below
+
+```{r import-flightline }
+
+flight1 <- readOGR("exports/SOAP_flightLines","NIS1_20130612_104651_atmcor")
+
+# look at this with our plots
+plot(chm)
+plot(polys.df, add=TRUE)
+plot(flight1, add=TRUE)
+
+```
+
+## Identify plots within flightline
+
+Note that 4 plots are close to the center of the flightline. We will subset for those 4 plots.
+
+```{r subset-plot-shapefiles }
+
+# choose the plots that intersect with flight 1 for extracting HSI
+flight1.plots <- intersect(polys.df, flight1)
+flight1.plots
+
+# check this subset
+plot(chm)
+plot(flight1.plots, add=TRUE)
+
+```
+
+## Boundary for hyperspectral subset
+
+Now we create a boundary that includes all 4 plots to subset the hyperspectral data.
+
+```{r overall-plot-boundary }
+
+# thanks for the code, leah!
+
+# define the CRS definition by EPSG code
+epsg <- 32611
+
+# define the file you want to work with
+# this is the hyperspectral flightline from the hard drive
+f <- paste0(dataDir, "/NIS1_20130612_104651_atmcor.h5")
+
+# define clip.extents
+clip.extent <- flight1.plots
+
+# calculate extent of H5 file
+h5.ext <- create_extent(f)
+h5.ext
+
+# turn the H5 extent into a polygon to check overlap
+h5.ext.poly <- as(extent(h5.ext), 
+                  "SpatialPolygons")
+
+crs(h5.ext.poly) <- crs(clip.extent)
+
+# test to see that the extents overlap
+gIntersects(h5.ext.poly, 
+            clip.extent)
+
+# Use the clip extent to create the index extent that can be used to slice out data from the 
+# H5 file
+# xmin.index, xmax.index, ymin.index, ymax.index
+# all units will be rounded which means the pixel must occupy a majority (.5 or greater)
+# within the clipping extent
+clip.extent[clip.extent$id.1 == i,]
+
+index.bounds <- vector("list", length(clip.extent))
+
+index.bounds <- calculate_index_extent(extent(clip.extent),
+								h5.ext)
+index.bounds
+
+# this is what i wrote to a csv!
+
+```
+
+
+
+
+
+
+# Old code starts here
+
 ```{r do-some-test-plots }
 
 setwd("~/Documents/data/NEONDI-2016/NEON_group_final/")
@@ -24,12 +219,7 @@ chm <- raster("../NEONdata/D17-California/SOAP/2013/lidar/SOAP_lidarCHM.tif")
 insitu <- read.csv("../NEONdata/D17-California/SOAP/2013/insitu/veg-structure/D17_2013_SOAP_vegStr.csv")
 
 
-
-plot(chm)
-plot(stem_map, add=TRUE)
-plot(centroids, add=TRUE, col="blue")
-
-stem_map <- readOGR("../NEONdata/D17-California/SOAP/2013/insitu/veg-structure",
+stem.map <- readOGR("../NEONdata/D17-California/SOAP/2013/insitu/veg-structure",
                     "soap_stems")
 
 
@@ -37,7 +227,10 @@ stem_map <- readOGR("../NEONdata/D17-California/SOAP/2013/insitu/veg-structure",
 centroids <- readOGR("../NEONdata/D17-California/SOAP/vector_data",
                     "SOAP_centroids")
 
-?plot
+
+plot(chm)
+plot(stem.map, add=TRUE)
+plot(centroids, add=TRUE, col="blue")
 
 insitu.sub <- subset(insitu, easting < 298000 & northing > 4100400)
 str(insitu)
@@ -51,14 +244,18 @@ insitu.sub$taxonid <- gsub("CAIN3","CEIN3", insitu.sub$taxonid)
 length(unique(insitu.sub$taxonid))
 unique(insitu.sub$taxonid)
 
-stem_map$taxonid <- gsub("CAIN3","CEIN3", stem_map$taxonid)
+stem.map$taxonid <- gsub("CAIN3","CEIN3", stem.map$taxonid)
 
 
-length(unique(stem_map$taxonid))
-length(unique(stem_map$scientific))
+length(unique(stem.map$taxonid))
+length(unique(stem.map$scientific))
 
 ?gsub
 
+str(stem.map)
+stem.map$id <- as.numeric(stem.map$plotid)
+sub <- stem.map$id == 15
+summary(sub)
 ```
 
 ## Using Leah Wasser's github code to try to subset AOP HSI data
@@ -140,28 +337,29 @@ recordRaster
 
 ## Now that I've got Leah's code working, I'm going to create smaller extents based on our stem locations and see which ones have the fewest number of hyperspectral flight lines associated with them.
 
+
 ```{r create-plot-extents }
 
 # first, I have to identify the boundaries of the plots where the stem locations
 # are present, since stem locations do not totally match up with centroids
 
-plot(stem_map)
+plot(stem.map)
 
 # i'm extracting the northing and easting max and min and 
 # adding or subtracting 5 as a buffer
-stem_map.extent <- stem_map@data %>% 
+stem.map.extent <- stem.map@data %>% 
   group_by(plotid) %>%
   summarise(northing.max = max(northing) + 5,
             northing.min = min(northing) - 5,
             easting.max = max(easting) + 5,
             easting.min = min(easting) - 5)
 
-names(stem_map.extent) <- c("plotid","yPlus","yMinus","xPlus","xMinus")
+names(stem.map.extent) <- c("plotid","yPlus","yMinus","xPlus","xMinus")
 
-yPlus <- stem_map.extent$northing.max
-yMinus <- stem_map.extent$northing.min
-xPlus <- stem_map.extent$easting.max
-xMinus <- stem_map.extent$easting.min
+yPlus <- stem.map.extent$northing.max
+yMinus <- stem.map.extent$northing.min
+xPlus <- stem.map.extent$easting.max
+xMinus <- stem.map.extent$easting.min
 
 # copying code from group uncertainty
 
@@ -172,7 +370,7 @@ square <- cbind(xMinus, yPlus,
                 xMinus, yPlus,
                 xMinus, yPlus)
 
-ID <- stem_map.extent$plotid
+ID <- stem.map.extent$plotid
 
 ```
 
@@ -240,8 +438,7 @@ find_intersect_h5 <- function(h5.files, clip.polygon){
 }
 
 ## Loop through all of the H5 files and return a list of what's "in"
-intersect_files <- find_intersect_h5(h5.files, 
-clip.polygon)
+intersect_files <- find_intersect_h5(h5.files, clip.polygon)
 
 ################### Next -- see if you can loop through polygons ####
 
